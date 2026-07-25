@@ -29,12 +29,17 @@ export default async function handler(req, res) {
             billing_cycle: billingCycle,
         });
 
+        // Derive the origin from the request itself rather than an env var —
+        // this stays correct across previews, production, and custom domains
+        // without needing to be updated every time the deployment URL changes.
+        const origin = req.headers.origin || `https://${req.headers.host}`;
+
         const link = await initiateTransaction({
             txRef,
             amount,
             currency,
             email: user.email,
-            redirectUrl: `${process.env.VITE_SITE_URL}/settings?payment=complete`,
+            redirectUrl: `${origin}/settings?payment=complete`,
         });
 
         return res.status(200).json({ link });
