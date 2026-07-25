@@ -6,7 +6,7 @@ import Sidebar from "../components/Sidebar";
 import PaymentModal from "../components/PaymentModal";
 
 export default function Settings() {
-  const { session, updateProfile, theme, setTheme, signOut, deleteAccount } = useApp();
+  const { session, updateProfile, refreshSession, theme, setTheme, signOut, deleteAccount } = useApp();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [name, setName] = useState(session?.name || "");
@@ -20,6 +20,21 @@ export default function Settings() {
       setJustPaid(true);
       searchParams.delete("payment");
       setSearchParams(searchParams, { replace: true });
+
+      // The webhook updates plan_tier asynchronously and may lag a couple
+      // seconds behind this redirect, so poll a few times instead of
+      // relying on a single refetch.
+      let attempts = 0;
+      const maxAttempts = 8; // ~24s total
+      const interval = setInterval(async () => {
+        attempts += 1;
+        const s = await refreshSession();
+        if (s?.plan_tier === "pro" || attempts >= maxAttempts) {
+          clearInterval(interval);
+          setJustPaid(false);
+        }
+      }, 3000);
+      return () => clearInterval(interval);
     }
   }, []);
 

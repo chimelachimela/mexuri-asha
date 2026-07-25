@@ -4,6 +4,8 @@ import { useApp } from "../context/AppContext";
 import Sidebar from "../components/Sidebar";
 import ChatMessage from "../components/ChatMessage";
 import SurveyBuildPanel from "../components/SurveyBuildPanel";
+import UpgradePill from "../components/UpgradePill";
+import PaymentModal from "../components/PaymentModal";
 import * as db from "../lib/services/dbService";
 import * as ai from "../lib/services/aiService";
 
@@ -204,6 +206,7 @@ export default function Chat() {
   const [planningIndex, setPlanningIndex] = useState(0);
   const [planningAnswers, setPlanningAnswers] = useState({});
   const [buildPanel, setBuildPanel] = useState(null); // { building, survey } | null
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const scrollRef = useRef(null);
 
@@ -417,9 +420,7 @@ export default function Chat() {
         <div className="flex-1 min-w-0 flex flex-col relative">
           {/* header */}
           <div className="flex items-center justify-between px-6 py-4 shrink-0">
-            {/* <button className="focus-ring flex items-center gap-1.5 text-sm text-ink/70 bg-panel border border-line rounded-lg px-3 py-1.5 hover:border-line2 transition">
-              Free
-            </button> */}
+            <UpgradePill onClick={() => setShowPaymentModal(true)} />
             <button
               onClick={handleNewChat}
               title="New chat"
@@ -428,6 +429,8 @@ export default function Chat() {
               <IconSquarePen size={17} />
             </button>
           </div>
+
+          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />}
 
           {errorMsg && (
             <div className="mx-6 mb-2 flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg px-3.5 py-2.5">

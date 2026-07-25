@@ -103,6 +103,12 @@ export function AppProvider({ children }) {
     return s;
   }, []);
 
+  const refreshSession = useCallback(async () => {
+    const s = await authService.refreshSession();
+    setSession(s);
+    return s;
+  }, []);
+
   const acceptTerms = useCallback(async () => {
     const s = await authService.acceptTerms();
     setSession(s);
@@ -129,6 +135,7 @@ export function AppProvider({ children }) {
         signInWithGoogle,
         completeOnboarding,
         updateProfile,
+        refreshSession,
         acceptTerms,
         signOut,
         deleteAccount,

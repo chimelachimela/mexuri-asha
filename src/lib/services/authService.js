@@ -30,6 +30,9 @@ function toAppSession(authUser, profile) {
     responseStyle: profile?.response_style || null,
     termsAcceptedAt: profile?.terms_accepted_at || null,   // NEW
     termsVersion: profile?.terms_version ?? null,           // NEW
+    plan_tier: profile?.plan_tier || "free",
+    premium_until: profile?.premium_until || null,
+    billing_cycle: profile?.billing_cycle || null,
   };
 }
 
@@ -60,6 +63,21 @@ export function markTermsAcceptedIntent() {
 }
 
 export function getSession() {
+  return cachedSession;
+}
+
+// Re-fetches the profile row for the current user without a full
+// auth round-trip — used after redirecting back from a payment, where
+// the webhook may have updated plan_tier server-side in the meantime.
+export async function refreshSession() {
+  if (!cachedSession) return null;
+  const profile = await fetchProfile(cachedSession.id);
+  const {
+    data: { session: authSession },
+  } = await supabase.auth.getSession();
+  if (!authSession) return null;
+  cachedSession = toAppSession(authSession.user, profile);
+  emit(cachedSession);
   return cachedSession;
 }
 
