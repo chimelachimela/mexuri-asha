@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Sun, Moon, Trash2 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import Sidebar from "../components/Sidebar";
+import PaymentModal from "../components/PaymentModal";
 
 export default function Settings() {
   const { session, updateProfile, theme, setTheme, signOut, deleteAccount } = useApp();
@@ -10,6 +11,20 @@ export default function Settings() {
   const [collapsed, setCollapsed] = useState(false);
   const [name, setName] = useState(session?.name || "");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [justPaid, setJustPaid] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("payment") === "complete") {
+      setJustPaid(true);
+      searchParams.delete("payment");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
+
+  const isPro = session?.plan_tier === "pro";
+  const expiresAt = session?.premium_until ? new Date(session.premium_until) : null;
 
   function saveName() {
     if (name.trim() && name.trim() !== session.name) updateProfile({ name: name.trim() });
@@ -40,18 +55,35 @@ export default function Settings() {
             <div className="text-xs text-ink/30 mt-2">{session?.email}</div>
           </section>
 
-          {/* <section className="mb-8">
+          {/* Plan section — replaces the old commented-out placeholder */}
+          <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Plan</h2>
+
+            {justPaid && (
+              <div className="text-xs text-ink/60 bg-panel2 border border-line rounded-lg px-3 py-2 mb-3">
+                Payment received — this may take a few seconds to reflect below.
+              </div>
+            )}
+
             <div className="flex items-center justify-between border border-line rounded-xl px-4 py-3.5">
               <div>
-                <div className="text-sm font-medium">Free plan</div>
-                <div className="text-xs text-ink/40">Limited chats & surveys per month</div>
+                <div className="text-sm font-medium">{isPro ? "Asha Pro" : "Free plan"}</div>
+                <div className="text-xs text-ink/40">
+                  {isPro && expiresAt
+                    ? `${session.billing_cycle === "daily" || session.billing_cycle === "weekly" ? "Expires" : "Renews"} ${expiresAt.toLocaleDateString()}`
+                    : "Limited chats & default template only"}
+                </div>
               </div>
-              <button className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 transition">
-                Upgrade
+              <button
+                onClick={() => setShowPaymentModal(true)}
+                className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 transition"
+              >
+                {isPro ? "Renew" : "Upgrade"}
               </button>
             </div>
-          </section> */}
+          </section>
+
+          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />}
 
           <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Theme</h2>
