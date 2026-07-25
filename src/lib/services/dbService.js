@@ -142,11 +142,11 @@ export async function deleteChat(chatId) {
 export async function listSurveys(userId) {
   const { data, error } = await supabase
     .from("surveys")
-    .select("*")
+    .select("*, responses(id)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return data.map((row) => mapSurveyRow(row));
+  return data.map((row) => mapSurveyRow(row, [], row.responses || []));
 }
 
 export async function getSurvey(surveyId) {
