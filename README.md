@@ -13,13 +13,13 @@ npm run dev
 
 Set these in Vercel → Project → Settings → Environment Variables (and in a local `.env` for `npm run dev`):
 
-| Variable | Used by | Notes |
-|---|---|---|
-| `VITE_SUPABASE_URL` | client + server | Your Supabase project URL. Not secret — safe to expose to the browser. |
-| `VITE_SUPABASE_ANON_KEY` | client | Public anon key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | server only (`api/*`) | **Never** prefix this with `VITE_` — it must never reach the browser. |
-| `GROQ_API_KEY` | server only (`api/ai/*`) | From [console.groq.com/keys](https://console.groq.com/keys). |
-| `GROQ_MODEL` | server only (`api/ai/*`) | Optional. Defaults to `llama-3.3-70b-versatile`. Set to e.g. `llama-3.1-8b-instant` for faster/cheaper replies. |
+| Variable                      | Used by                    | Notes                                                                                                               |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `VITE_SUPABASE_URL`         | client + server            | Your Supabase project URL. Not secret — safe to expose to the browser.                                             |
+| `VITE_SUPABASE_ANON_KEY`    | client                     | Public anon key.                                                                                                    |
+| `SUPABASE_SERVICE_ROLE_KEY` | server only (`api/*`)    | **Never** prefix this with `VITE_` — it must never reach the browser.                                      |
+| `GROQ_API_KEY`              | server only (`api/ai/*`) | From[console.groq.com/keys](https://console.groq.com/keys).                                                            |
+| `GROQ_MODEL`                | server only (`api/ai/*`) | Optional. Defaults to `llama-3.3-70b-versatile`. Set to e.g. `llama-3.1-8b-instant` for faster/cheaper replies. |
 
 You do **not** need a separate `SUPABASE_URL` — the server routes fall back to `VITE_SUPABASE_URL` (see `api/_lib/supabaseAdmin.js`).
 
@@ -77,3 +77,7 @@ Typing "+" in the composer lets you attach one of your surveys to a message. Ash
 ## Deploying
 
 `vercel.json` already has the SPA rewrite so client-side routes survive a refresh.
+
+# Latest Changes
+
+Check the Chat.jsx file (line 423) and the Settings.jsx file (Line 79 - 102), I commented out the payment gate way trigger, when the payment gate way is fully active just uncomment it and change the neccessary API keys in the .env.local file
