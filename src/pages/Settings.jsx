@@ -71,7 +71,7 @@ export default function Settings() {
           </section>
 
           {/* Plan section — replaces the old commented-out placeholder */}
-          <section className="mb-8">
+          {/* <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Plan</h2>
 
             {justPaid && (
@@ -98,7 +98,7 @@ export default function Settings() {
             </div>
           </section>
 
-          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />}
+          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />} */}
 
           <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Theme</h2>

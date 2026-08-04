@@ -42,8 +42,12 @@ export default function PaymentModal({ onClose }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
             <div className="w-full max-w-md bg-panel border border-line rounded-xl2 shadow-modal overflow-hidden">
                 {/* Fun visual header — swap for an actual illustration/graphic asset */}
-                <div className="h-32 bg-gradient-to-br from-btn/30 to-panel3 flex items-center justify-center">
-                    <span className="text-4xl">✨</span>
+                <div className="h-45 bg-gradient-to-br from-btn/30 to-panel3 flex items-center justify-center overflow-hidden">
+                    <img
+                        src="https://res.cloudinary.com/xtydyhi0/image/upload/v1785667381/1_ip9xxv.png"
+                        alt=""
+                        className="w-full h-full object-cover"
+                    />
                 </div>
 
                 <div className="p-6">

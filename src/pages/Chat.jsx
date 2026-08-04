@@ -420,7 +420,7 @@ export default function Chat() {
         <div className="flex-1 min-w-0 flex flex-col relative">
           {/* header */}
           <div className="flex items-center justify-between px-6 py-4 shrink-0">
-            <UpgradePill onClick={() => setShowPaymentModal(true)} />
+            {/* <UpgradePill onClick={() => setShowPaymentModal(true)} /> */}
             <button
               onClick={handleNewChat}
               title="New chat"
