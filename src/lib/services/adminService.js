@@ -12,23 +12,26 @@ async function request(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || "Admin request failed");
   return body;
 }
 
-export function getStats() {
-  return request("/api/admin/stats");
-}
+export function getStats() { return request("/api/admin/stats"); }
+export function getUsers(page = 1, perPage = 1000) { return request(`/api/admin/users?page=${page}&perPage=${perPage}`); }
 
-export function getUsers(page = 1, perPage = 100) {
-  return request(`/api/admin/users?page=${page}&perPage=${perPage}`);
+export async function getAllUsers() {
+  const all = [];
+  let page = 1;
+  while (true) {
+    const result = await getUsers(page, 1000);
+    all.push(...(result.users || []));
+    if (!result.nextPage) break;
+    page = result.nextPage;
+  }
+  return all;
 }
 
 export function askAsha(question) {
-  return request("/api/admin/insights", {
-    method: "POST",
-    body: JSON.stringify({ question }),
-  });
+  return request("/api/admin/insights", { method: "POST", body: JSON.stringify({ question }) });
 }
