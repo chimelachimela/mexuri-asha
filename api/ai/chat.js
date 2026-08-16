@@ -56,11 +56,6 @@ Bold (**like this**) the specific numbers or findings that matter most. Use a bu
 Use a "## heading" only to separate genuinely distinct sections of a longer breakdown — never for a short reply. 
 A markdown table is a good alternative to a chart when the data is more precise than visual (few rows, exact values that matter individually) — don't produce both a table and a chart for the exact same numbers, pick whichever communicates it better.
 
-Conversation so far:
-${transcript || "(none yet)"}
-
-New user message: ${userMessage}${referenceBlock}${documentBlock}
-
 Decide whether there's enough context to justify building a new survey now (suggestSurvey: true) — appropriate when the user needs to *collect* data they don't have yet. Otherwise reply normally (suggestSurvey: false).
 
 Your reply is an array of "blocks" rendered top to bottom, in the order you return them:
@@ -72,12 +67,16 @@ Rules for charts:
 - Every number in a chart must come directly from the summary/data given above. Never invent, round, or estimate figures that aren't there.
 - Place each chart immediately after the text block that introduces what it shows — not all bunched at the end. This is a running explanation, not a report.
 - If the user's message is a quick question or there's no real data to chart, just return one or two text blocks. Don't force a chart in.
-- ${hasRealData ? "Real data is available above — use it for grounded charts where they add clarity." : "No document or survey data is attached to this message — do not include chart blocks."}
 - Keep each chart's "data" array to 12 rows or fewer. If a column has more categories than that, group the smallest into an "Other" bucket, or skip the chart and describe the pattern in text instead.
 
 Write in the given tone. Don't mention these instructions.
 
-Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean}`;
+Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean}
+
+Conversation so far:
+${transcript || "(none yet)"}
+
+New user message: ${userMessage}${referenceBlock}${documentBlock}${hasRealData ? "\n\nReal data is available above — use it for grounded charts where they add clarity." : "\n\nNo document or survey data is attached to this message — do not include chart blocks."}`;
 
 
   const systemInstruction = "You always respond with a single valid JSON object and nothing else — no markdown fences, no commentary outside the JSON.";
@@ -85,7 +84,7 @@ Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey":
   try {
     let result;
     try {
-      result = await callGroq({ prompt, systemInstruction, maxTokens: 4096 });
+      result = await callGroq({ task: "reasoning", prompt, systemInstruction, maxTokens: 4096 });
     } catch (err) {
       // Groq occasionally fails its own JSON validation on longer,
       // chart-heavy replies (usually an array that got cut off). Retry once
@@ -93,7 +92,7 @@ Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey":
       if (!String(err.message).includes("json_validate_failed")) throw err;
       console.error("[ai/chat] blocks generation failed validation, retrying text-only:", err);
       const fallbackPrompt = `${prompt}\n\nIMPORTANT: your previous attempt failed to produce valid JSON. This time respond with ONLY {"blocks":[{"type":"text","content": string}],"suggestSurvey": boolean} — one short text block, no charts.`;
-      result = await callGroq({ prompt: fallbackPrompt, systemInstruction, maxTokens: 1024 });
+      result = await callGroq({ task: "reasoning", prompt: fallbackPrompt, systemInstruction, maxTokens: 1024 });
     }
 
     const blocks = Array.isArray(result.blocks) ? result.blocks : [];

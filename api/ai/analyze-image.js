@@ -30,6 +30,7 @@ Respond with ONLY a JSON object of this shape: {"summary": string}`;
 
     try {
         const result = await callGroq({
+            task: "vision",
             systemInstruction: "You always respond with a single valid JSON object and nothing else — no markdown fences, no commentary outside the JSON.",
             content: [
                 { type: "text", text: instructions },
