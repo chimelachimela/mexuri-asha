@@ -27,7 +27,6 @@ Respond with ONLY a JSON object of this shape:
     const withIds = questions.map((q, i) => ({ id: `q${i + 1}`, text: q.text, options: q.options || [] }));
     return res.status(200).json({ questions: withIds });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message || "AI request failed" });
+    return logAndFail(res, 500, "ai/generate-planning-questions", err, "Couldn't put together planning questions. Please try again.");
   }
 }

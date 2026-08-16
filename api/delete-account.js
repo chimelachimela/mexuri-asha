@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
   const { error } = await supabaseAdmin.auth.admin.deleteUser(user.id);
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return logAndFail(res, 500, "delete-account", error, "Couldn't delete your account. Please try again or contact support.");
 
   return res.status(200).json({ success: true });
 }

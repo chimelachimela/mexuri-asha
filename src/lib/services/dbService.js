@@ -21,6 +21,11 @@ function mapMessageRow(row) {
     suggestSurvey: row.suggest_survey,
     referencedSurveyId: row.referenced_survey_id || undefined,
     referencedSurveyTitle: row.referenced_survey_title || undefined,
+    attachmentName: row.attachment_name || undefined,
+    attachmentType: row.attachment_type || undefined,
+    attachmentSummary: row.attachment_summary || undefined,
+    attachmentPath: row.attachment_path || undefined,
+    blocks: row.blocks || null,
   };
 }
 
@@ -124,6 +129,11 @@ export async function appendMessage(chatId, message) {
       suggest_survey: message.suggestSurvey || false,
       referenced_survey_id: message.referencedSurveyId || null,
       referenced_survey_title: message.referencedSurveyTitle || null,
+      attachment_name: message.attachmentName || null,
+      attachment_type: message.attachmentType || null,
+      attachment_summary: message.attachmentSummary || null,
+      attachment_path: message.attachmentPath || null,
+      blocks: message.blocks || null,
     })
     .select()
     .single();

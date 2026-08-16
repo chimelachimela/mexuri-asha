@@ -71,6 +71,14 @@ create policy "Users manage messages in their own chats"
     exists (select 1 from public.chats where chats.id = messages.chat_id and chats.user_id = auth.uid())
   );
 
+-- ---------- document attachments (added for data-analysis feature) ----------
+-- Generic enough to cover CSV/Excel now and PDF/Word/images later without
+-- a second migration.
+alter table public.messages
+  add column if not exists attachment_name text,
+  add column if not exists attachment_type text,   -- 'csv' | 'xlsx' | (later: 'pdf' | 'docx' | 'image')
+  add column if not exists attachment_summary text; -- compact text handed to the AI, same role as referenced_survey's responseSummary
+
 create index if not exists messages_chat_id_idx on public.messages(chat_id);
 
 -- ---------- surveys ----------

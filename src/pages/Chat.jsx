@@ -6,8 +6,12 @@ import ChatMessage from "../components/ChatMessage";
 import SurveyBuildPanel from "../components/SurveyBuildPanel";
 import UpgradePill from "../components/UpgradePill";
 import PaymentModal from "../components/PaymentModal";
+import SurveyPickerModal from "../components/SurveyPickerModal";
 import * as db from "../lib/services/dbService";
 import * as ai from "../lib/services/aiService";
+import { parseSpreadsheetFile, summarizeSpreadsheet } from "../lib/documentInsights";
+import { uploadAttachment, getAttachmentUrl } from "../lib/services/storageService";
+import AttachmentPreview from "../components/AttachmentPreview";
 
 // ---------- inline SVG icons (replaces lucide-react) ----------
 function IconPlus({ size = 17, className = "" }) {
@@ -23,6 +27,26 @@ function IconSend({ size = 15, className = "" }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" />
       <path d="M6 12h16" />
+    </svg>
+  );
+}
+
+function IconImage({ size = 14, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  );
+}
+
+function IconClipboard({ size = 14, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <path d="M9 12h6M9 16h6" />
     </svg>
   );
 }
@@ -199,8 +223,12 @@ export default function Chat() {
   const [planningLoading, setPlanningLoading] = useState(false);
 
   const [mySurveys, setMySurveys] = useState([]);
-  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [surveyModalOpen, setSurveyModalOpen] = useState(false);
   const [referencedSurvey, setReferencedSurvey] = useState(null);
+  const [attachedDocument, setAttachedDocument] = useState(null); // { fileName, type, summary }
+  const [attaching, setAttaching] = useState(false);
+  const [attachingStage, setAttachingStage] = useState(""); // "uploading" | "analyzing"
 
   const [planningQuestions, setPlanningQuestions] = useState(null); // array | null
   const [planningIndex, setPlanningIndex] = useState(0);
@@ -262,8 +290,13 @@ export default function Chat() {
     navigate(`/chat/${id}`);
   }
 
-  function toggleRefPicker() {
-    setRefPickerOpen((o) => !o);
+  function togglePlusMenu() {
+    setPlusMenuOpen((o) => !o);
+  }
+
+  function openSurveyModal() {
+    setPlusMenuOpen(false);
+    setSurveyModalOpen(true);
   }
 
   async function pickReference(survey) {
@@ -273,11 +306,67 @@ export default function Chat() {
     } catch (err) {
       setErrorMsg(err.message || "Couldn't load that survey.");
     }
-    setRefPickerOpen(false);
+    setSurveyModalOpen(false);
   }
 
   function clearReference() {
     setReferencedSurvey(null);
+  }
+
+  function clearAttachment() {
+    if (attachedDocument?.previewUrl) URL.revokeObjectURL(attachedDocument.previewUrl);
+    setAttachedDocument(null);
+  }
+
+  async function handleAttachFile(file) {
+    if (!file) return;
+    setAttaching(true);
+    setAttachingStage("uploading");
+    setErrorMsg("");
+    const isImage = file.type.startsWith("image/");
+    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+
+    try {
+      const storagePath = await uploadAttachment(file, session.id);
+
+      if (isImage) {
+        // Show the attachment immediately (preview + "analyzing" state)
+        // rather than blocking on the vision call before anything appears.
+        setAttachedDocument({ fileName: file.name, type: "image", summary: null, storagePath, previewUrl });
+        setAttachingStage("analyzing");
+        try {
+          // Groq's servers need to fetch this over the internet — a signed
+          // URL into the private bucket, not the local blob: preview URL.
+          const signedUrl = await getAttachmentUrl(storagePath);
+          const summary = await ai.analyzeImage(signedUrl);
+          setAttachedDocument((prev) =>
+            prev?.storagePath === storagePath ? { ...prev, summary } : prev
+          );
+        } catch (err) {
+          // Non-fatal: the image stays attached and visible, just without
+          // an AI-readable summary — chat.js simply won't build a
+          // documentBlock for it (same as any attachment with no summary).
+          console.error("Image analysis failed:", err);
+          setErrorMsg("Attached the image, but couldn't analyze it — Asha won't be able to reference its contents.");
+        }
+      } else {
+        const { columns, rows } = await parseSpreadsheetFile(file);
+        const summary = summarizeSpreadsheet({ fileName: file.name, columns, rows });
+        setAttachedDocument({
+          fileName: file.name,
+          type: file.name.split(".").pop().toLowerCase(),
+          summary,
+          storagePath,
+          previewUrl: null,
+        });
+      }
+    } catch (err) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setErrorMsg(err.message || "Couldn't attach that file.");
+    } finally {
+      setAttaching(false);
+      setAttachingStage("");
+    }
   }
 
   async function handleSend() {
@@ -301,9 +390,16 @@ export default function Chat() {
         text,
         referencedSurveyId: referencedSurvey?.id,
         referencedSurveyTitle: referencedSurvey?.title,
+        attachmentName: attachedDocument?.fileName,
+        attachmentType: attachedDocument?.type,
+        attachmentSummary: attachedDocument?.summary,
+        attachmentPath: attachedDocument?.storagePath,
       });
-      chat = { ...chat, messages: [...chat.messages, userMsg] };
+      const localPreviewUrl = attachedDocument?.type === "image" ? attachedDocument.previewUrl : undefined;
+      chat = { ...chat, messages: [...chat.messages, { ...userMsg, previewUrl: localPreviewUrl }] };
       setActiveChat(chat);
+      const sentDocument = attachedDocument;
+      setAttachedDocument(null); // clear once it's attached to this message, same as a reference would be
 
       // Title generation and the AI reply are independent — run them
       // together instead of waiting on one before starting the other.
@@ -313,6 +409,7 @@ export default function Chat() {
         userMessage: text,
         responseStyle: session.responseStyle,
         referencedSurvey: referencedSurvey || null,
+        documentContext: sentDocument ? { fileName: sentDocument.fileName, summary: sentDocument.summary } : null,
       });
 
       const [title, reply] = await Promise.all([titlePromise, replyPromise]);
@@ -326,6 +423,7 @@ export default function Chat() {
       const assistantMsg = await db.appendMessage(chat.id, {
         role: "assistant",
         text: reply.text,
+        blocks: reply.blocks,
         suggestSurvey: reply.suggestSurvey,
       });
       chat = { ...chat, messages: [...chat.messages, assistantMsg] };
@@ -458,8 +556,16 @@ export default function Chat() {
                   referencedSurvey={referencedSurvey}
                   onPickReference={pickReference}
                   onClearReference={clearReference}
-                  refPickerOpen={refPickerOpen}
-                  onToggleRefPicker={toggleRefPicker}
+                  plusMenuOpen={plusMenuOpen}
+                  onTogglePlusMenu={togglePlusMenu}
+                  surveyModalOpen={surveyModalOpen}
+                  onOpenSurveyModal={openSurveyModal}
+                  onCloseSurveyModal={() => setSurveyModalOpen(false)}
+                  attachedDocument={attachedDocument}
+                  onAttachFile={handleAttachFile}
+                  onClearAttachment={clearAttachment}
+                  attaching={attaching}
+                  attachingStage={attachingStage}
                 />
               </div>
             </div>
@@ -470,7 +576,7 @@ export default function Chat() {
                 className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
                 style={{ paddingBottom: scrollPaddingBottom }}
               >
-                <div className="max-w-2xl mx-auto space-y-6">
+                <div className="max-w-3xl mx-auto space-y-6">
                   {activeChat.messages.map((m) => (
                     <ChatMessage key={m.id} message={m} onStartSurvey={handleStartSurvey} />
                   ))}
@@ -520,8 +626,16 @@ export default function Chat() {
                       referencedSurvey={referencedSurvey}
                       onPickReference={pickReference}
                       onClearReference={clearReference}
-                      refPickerOpen={refPickerOpen}
-                      onToggleRefPicker={toggleRefPicker}
+                      plusMenuOpen={plusMenuOpen}
+                      onTogglePlusMenu={togglePlusMenu}
+                      surveyModalOpen={surveyModalOpen}
+                      onOpenSurveyModal={openSurveyModal}
+                      onCloseSurveyModal={() => setSurveyModalOpen(false)}
+                      attachedDocument={attachedDocument}
+                      onAttachFile={handleAttachFile}
+                      onClearAttachment={clearAttachment}
+                      attaching={attaching}
+                      attachingStage={attachingStage}
                     />
                   )}
                 </div>
@@ -545,19 +659,14 @@ export default function Chat() {
 const TEXTAREA_MAX_HEIGHT = 500;
 
 function Composer({
-  input,
-  setInput,
-  onSend,
-  sending,
-  centered,
-  mySurveys,
-  referencedSurvey,
-  onPickReference,
-  onClearReference,
-  refPickerOpen,
-  onToggleRefPicker,
+  input, setInput, onSend, sending, centered, mySurveys, referencedSurvey,
+  onPickReference, onClearReference,
+  plusMenuOpen, onTogglePlusMenu, surveyModalOpen, onOpenSurveyModal, onCloseSurveyModal,
+  attachedDocument, onAttachFile, onClearAttachment, attaching, attachingStage,
 }) {
   const textareaRef = useRef(null);
+  const docInputRef = useRef(null);
+  const imageInputRef = useRef(null);
   const idlePlaceholder = useIdlePlaceholder(!input && !sending);
 
   // Refocus once a send finishes — covers both "clicked the send button"
@@ -589,6 +698,27 @@ function Composer({
           </button>
         </div>
       )}
+      {attachedDocument && (
+        <div className="mb-2 flex items-center gap-2">
+          <AttachmentPreview
+            fileName={attachedDocument.fileName}
+            type={attachedDocument.type}
+            previewUrl={attachedDocument.previewUrl}
+            onClear={onClearAttachment}
+          />
+          {attaching && attachingStage === "analyzing" && (
+            <span className="text-xs text-ink/50 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-ink/40 animate-pulse" />
+              Reading image…
+            </span>
+          )}
+        </div>
+      )}
+      {attaching && !attachedDocument && (
+        <div className="flex items-center gap-2 mb-2 bg-panel2 border border-line rounded-lg px-2.5 py-1.5 w-fit">
+          <span className="text-xs text-ink/50">Uploading…</span>
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         autoFocus
@@ -606,30 +736,61 @@ function Composer({
         style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
       />
       <div className="flex items-center justify-between mt-2 relative">
-        <button
-          onClick={onToggleRefPicker}
-          title="Reference a survey"
-          className="focus-ring w-8 h-8 rounded-lg flex items-center justify-center text-ink/50 hover:text-ink hover:bg-panel2 transition"
-        >
-          <IconPlus size={17} />
-        </button>
+        <div className="relative">
+          <button
+            onClick={onTogglePlusMenu}
+            title="Add"
+            className="focus-ring w-8 h-8 rounded-lg flex items-center justify-center text-ink/50 hover:text-ink hover:bg-panel2 transition"
+          >
+            <IconPlus size={17} />
+          </button>
 
-        {refPickerOpen && (
-          <div className="absolute bottom-11 left-0 w-64 max-h-56 overflow-y-auto bg-panel border border-line rounded-xl shadow-modal py-1 z-10">
-            {mySurveys.length === 0 && (
-              <div className="text-xs text-ink/30 px-3 py-2.5">No surveys yet</div>
-            )}
-            {mySurveys.map((s) => (
+          <input
+            ref={docInputRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onAttachFile(file);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onAttachFile(file);
+              e.target.value = "";
+            }}
+          />
+
+          {plusMenuOpen && (
+            <div className="absolute bottom-11 left-0 w-48 bg-panel border border-line rounded-xl shadow-modal py-1 z-10">
               <button
-                key={s.id}
-                onClick={() => onPickReference(s)}
-                className="focus-ring w-full text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition truncate"
+                onClick={() => { onTogglePlusMenu(); docInputRef.current?.click(); }}
+                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
               >
-                {s.title}
+                <IconFileText size={14} /> Add documents
               </button>
-            ))}
-          </div>
-        )}
+              <button
+                onClick={() => { onTogglePlusMenu(); imageInputRef.current?.click(); }}
+                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
+              >
+                <IconImage size={14} /> Add pictures
+              </button>
+              <button
+                onClick={onOpenSurveyModal}
+                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
+              >
+                <IconClipboard size={14} /> Add survey
+              </button>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={onSend}
@@ -639,6 +800,14 @@ function Composer({
           <IconSend size={15} />
         </button>
       </div>
+
+      {surveyModalOpen && (
+        <SurveyPickerModal
+          surveys={mySurveys}
+          onPick={onPickReference}
+          onClose={onCloseSurveyModal}
+        />
+      )}
     </div>
   );
 }

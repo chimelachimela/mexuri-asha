@@ -20,7 +20,7 @@ async function authedPost(path, body) {
   return res.json();
 }
 
-export async function sendMessage({ history, userMessage, responseStyle = "casual", referencedSurvey = null }) {
+export async function sendMessage({ history, userMessage, responseStyle = "casual", referencedSurvey = null, documentContext = null }) {
   return authedPost("/api/ai/chat", {
     history,
     userMessage,
@@ -34,6 +34,11 @@ export async function sendMessage({ history, userMessage, responseStyle = "casua
         // raw rows — keeps the request small (and fast) too.
         responseSummary: summarizeSurveyResponses(referencedSurvey),
       }
+      : null,
+    // documentContext.summary is already the compact text from
+    // documentInsights.js — the server just slots it into the prompt.
+    documentContext: documentContext
+      ? { fileName: documentContext.fileName, summary: documentContext.summary }
       : null,
   });
 }
@@ -50,4 +55,11 @@ export async function generateSurvey({ chatContext }) {
 export async function generatePlanningQuestions(topic) {
   const { questions } = await authedPost("/api/ai/generate-planning-questions", { topic });
   return questions;
+}
+
+// imageUrl must be reachable by Groq's servers — a Supabase signed URL
+// (see storageService.getAttachmentUrl), not a local blob: URL.
+export async function analyzeImage(imageUrl) {
+  const { summary } = await authedPost("/api/ai/analyze-image", { imageUrl });
+  return summary;
 }

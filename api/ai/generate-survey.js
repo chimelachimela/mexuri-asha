@@ -44,6 +44,6 @@ Respond with ONLY a JSON object of this shape:
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: err.message || "AI request failed" });
+    return logAndFail(res, 500, "ai/generate-survey", err, "Couldn't build the survey. Please try again.");
   }
 }

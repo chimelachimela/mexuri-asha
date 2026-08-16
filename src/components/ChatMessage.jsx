@@ -1,5 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Copy, Check, ThumbsUp, ThumbsDown, Share2, RotateCw, MoreHorizontal, ArrowRight, FileText } from "lucide-react";
+import ChatChart from "./ChatChart";
+import AttachmentPreview from "./AttachmentPreview";
+import MarkdownText from "./MarkdownText";
+import { getAttachmentUrl } from "../lib/services/storageService";
+
+function AttachedFile({ message }) {
+  const [previewUrl, setPreviewUrl] = useState(message.previewUrl || null);
+
+  useEffect(() => {
+    if (!message.previewUrl && message.attachmentType === "image" && message.attachmentPath) {
+      getAttachmentUrl(message.attachmentPath).then(setPreviewUrl).catch(() => { });
+    }
+  }, [message.previewUrl, message.attachmentPath, message.attachmentType]);
+
+  return (
+    <AttachmentPreview fileName={message.attachmentName} type={message.attachmentType} previewUrl={previewUrl} />
+  );
+}
 
 export default function ChatMessage({ message, onStartSurvey }) {
   const [copied, setCopied] = useState(false);
@@ -19,6 +37,11 @@ export default function ChatMessage({ message, onStartSurvey }) {
             <span className="text-[11px] text-ink/60 truncate">{message.referencedSurveyTitle}</span>
           </div>
         )}
+        {message.attachmentName && (
+          <div className="mb-1.5">
+            <AttachedFile message={message} />
+          </div>
+        )}
         <div className="bg-panel2 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm">{message.text}</div>
       </div>
     );
@@ -27,7 +50,17 @@ export default function ChatMessage({ message, onStartSurvey }) {
 
   return (
     <div className="max-w-[85%] animate-fadeInUp">
-      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
+      {Array.isArray(message.blocks) && message.blocks.length > 0 ? (
+        message.blocks.map((block, i) =>
+          block.type === "chart" ? (
+            <ChatChart key={i} chart={block.chart} />
+          ) : (
+            <MarkdownText key={i} content={block.content} />
+          )
+        )
+      ) : (
+        <MarkdownText content={message.text} />
+      )}
 
       {message.suggestSurvey && (
         <button
