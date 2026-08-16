@@ -24,6 +24,7 @@ Respond with ONLY a JSON object of this shape:
 
   try {
     const result = await callGroq({
+      task: "reasoning",
       prompt,
       systemInstruction: "You always respond with a single valid JSON object and nothing else — no markdown fences, no commentary outside the JSON.",
     });
