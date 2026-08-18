@@ -14,6 +14,16 @@ function AttachedFile({ message }) {
     }
   }, [message.previewUrl, message.attachmentPath, message.attachmentType]);
 
+  if (message.attachmentType === "image" && previewUrl) {
+    return (
+      <img
+        src={previewUrl}
+        alt={message.attachmentName}
+        className="max-w-[320px] max-h-[400px] rounded-2xl border border-line"
+      />
+    );
+  }
+
   return (
     <AttachmentPreview fileName={message.attachmentName} type={message.attachmentType} previewUrl={previewUrl} />
   );
