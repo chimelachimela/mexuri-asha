@@ -31,6 +31,16 @@ function IconSend({ size = 15, className = "" }) {
   );
 }
 
+function IconUpload({ size = 22, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
 function IconImage({ size = 14, className = "" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -230,6 +240,11 @@ export default function Chat() {
   const [attaching, setAttaching] = useState(false);
   const [attachingStage, setAttachingStage] = useState(""); // "uploading" | "analyzing"
 
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const attachTokenRef = useRef(0); // to clear attachment and stop uploading instantly
+
   const [planningQuestions, setPlanningQuestions] = useState(null); // array | null
   const [planningIndex, setPlanningIndex] = useState(0);
   const [planningAnswers, setPlanningAnswers] = useState({});
@@ -314,12 +329,16 @@ export default function Chat() {
   }
 
   function clearAttachment() {
+    attachTokenRef.current += 1; // invalidates any in-flight upload/analysis for this attach
     if (attachedDocument?.previewUrl) URL.revokeObjectURL(attachedDocument.previewUrl);
     setAttachedDocument(null);
+    setAttaching(false);
+    setAttachingStage("");
   }
 
   async function handleAttachFile(file) {
     if (!file) return;
+    const token = ++attachTokenRef.current;
     setAttaching(true);
     setAttachingStage("uploading");
     setErrorMsg("");
@@ -328,45 +347,90 @@ export default function Chat() {
 
     try {
       const storagePath = await uploadAttachment(file, session.id);
+      if (token !== attachTokenRef.current) {
+        // cleared while this was still uploading — drop it silently
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        return;
+      }
 
       if (isImage) {
-        // Show the attachment immediately (preview + "analyzing" state)
-        // rather than blocking on the vision call before anything appears.
         setAttachedDocument({ fileName: file.name, type: "image", summary: null, storagePath, previewUrl });
         setAttachingStage("analyzing");
         try {
-          // Groq's servers need to fetch this over the internet — a signed
-          // URL into the private bucket, not the local blob: preview URL.
           const signedUrl = await getAttachmentUrl(storagePath);
           const summary = await ai.analyzeImage(signedUrl);
-          setAttachedDocument((prev) =>
-            prev?.storagePath === storagePath ? { ...prev, summary } : prev
-          );
+          if (token === attachTokenRef.current) {
+            setAttachedDocument((prev) =>
+              prev?.storagePath === storagePath ? { ...prev, summary } : prev
+            );
+          }
         } catch (err) {
-          // Non-fatal: the image stays attached and visible, just without
-          // an AI-readable summary — chat.js simply won't build a
-          // documentBlock for it (same as any attachment with no summary).
-          console.error("Image analysis failed:", err);
-          setErrorMsg("Attached the image, but couldn't analyze it — Asha won't be able to reference its contents.");
+          if (token === attachTokenRef.current) {
+            console.error("Image analysis failed:", err);
+            setErrorMsg("Attached the image, but couldn't analyze it — Asha won't be able to reference its contents.");
+          } else {
+            console.error("Image analysis failed (attachment already cleared):", err);
+          }
         }
       } else {
         const { columns, rows } = await parseSpreadsheetFile(file);
         const summary = summarizeSpreadsheet({ fileName: file.name, columns, rows });
-        setAttachedDocument({
-          fileName: file.name,
-          type: file.name.split(".").pop().toLowerCase(),
-          summary,
-          storagePath,
-          previewUrl: null,
-        });
+        if (token === attachTokenRef.current) {
+          setAttachedDocument({
+            fileName: file.name,
+            type: file.name.split(".").pop().toLowerCase(),
+            summary,
+            storagePath,
+            previewUrl: null,
+          });
+        }
       }
     } catch (err) {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setErrorMsg(err.message || "Couldn't attach that file.");
+      if (token === attachTokenRef.current) {
+        setErrorMsg(err.message || "Couldn't attach that file.");
+      }
     } finally {
-      setAttaching(false);
-      setAttachingStage("");
+      if (token === attachTokenRef.current) {
+        setAttaching(false);
+        setAttachingStage("");
+      }
     }
+  }
+
+  function handleDragEnter(e) {
+    e.preventDefault();
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    dragCounterRef.current += 1;
+    setIsDraggingFile(true);
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault(); // required, or the browser refuses the drop
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDraggingFile(false);
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const isSupported = file.type.startsWith("image/") || ["csv", "xlsx", "xls"].includes(ext);
+    if (!isSupported) {
+      setErrorMsg("That file type isn't supported yet — try an image, CSV, or Excel file.");
+      return;
+    }
+    handleAttachFile(file);
   }
 
   async function handleSend() {
@@ -504,7 +568,13 @@ export default function Chat() {
     : composerHeight + COMPOSER_BUFFER;
 
   return (
-    <div className="h-[100dvh] w-full bg-canvas flex overflow-hidden">
+    <div
+      className="h-[100dvh] w-full bg-canvas flex overflow-hidden relative"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <Sidebar
         activeChat={activeChat?.id}
         onSelectChat={handleSelectChat}
@@ -652,6 +722,16 @@ export default function Chat() {
           />
         )}
       </div>
+
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-canvas/70 backdrop-blur-sm pointer-events-none">
+          <div className="border-2 border-dashed border-ink/30 rounded-2xl px-10 py-8 flex flex-col items-center gap-2">
+            <IconUpload size={26} className="text-ink/50" />
+            <p className="text-sm font-medium text-ink/80">Drop file to attach</p>
+            <p className="text-xs text-ink/40">Images, CSV, or Excel files</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
