@@ -11,4 +11,4 @@ FLW_WEBHOOK_HASH=
 VITE_API_BASE_URL=
 
 # Comma-separated emails allowed to access /admin.
-ADMIN_EMAILS=chimelajnr@gmail.com,mexuritest@gmail.com
+ADMIN_EMAILS=admin1@company.com,admin2@company.com
