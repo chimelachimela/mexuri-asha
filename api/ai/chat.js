@@ -2,6 +2,7 @@ import { verifyUser } from "../_lib/verifyUser.js";
 import { callGroq } from "../_lib/groq.js";
 import { applyCors } from "../_lib/cors.js";
 import { logAndFail } from "../_lib/errors.js";
+import { BRAND_RULES } from "../_lib/brand.js";
 
 const STYLE_GUIDE = {
   casual: "Friendly, relaxed, conversational. Contractions are fine.",
@@ -10,6 +11,34 @@ const STYLE_GUIDE = {
   concise: "Short, direct, no fluff. Minimal words.",
 };
 
+const SPREADSHEET_TYPES = ["csv", "xlsx", "xls"];
+
+// Hard ceiling on the combined attachment context sent to the model,
+// regardless of how many files are attached — a safety net on top of the
+// per-file budgets documentInsights.js already applies client-side.
+const MAX_TOTAL_DOC_CONTEXT_CHARS = 9000;
+
+// documentContexts: [{ fileName, type, summary }, ...] -> single prompt block.
+// Splits the shared budget evenly so one long summary can't starve the rest,
+// and tells the model explicitly to reason across files together when
+// there's more than one — that's the actual "analyze them at the same time" ask.
+function buildDocumentsBlock(documentContexts) {
+  const withSummaries = (documentContexts || []).filter((d) => d?.summary);
+  if (!withSummaries.length) return "";
+
+  const perFileCap = Math.floor(MAX_TOTAL_DOC_CONTEXT_CHARS / withSummaries.length);
+  const fileBlocks = withSummaries.map((d, i) => {
+    const summary = d.summary.length > perFileCap ? d.summary.slice(0, perFileCap) + "\n...(truncated to fit)" : d.summary;
+    return `--- File ${i + 1}: "${d.fileName}" ---\n${summary}`;
+  });
+
+  const intro = withSummaries.length > 1
+    ? `The user attached ${withSummaries.length} files to this message. Treat them as one combined context for the reply below — cross-reference and compare across files where it's relevant to what they're asking, and be explicit about which file a number or finding comes from when it matters.`
+    : `The user just attached a file. Here's a summary of its contents — use it as context for your reply.`;
+
+  return `\n\n${intro}\n\n${fileBlocks.join("\n\n")}\n\nGround every claim in the actual data above; never invent numbers, rows, or details that aren't there. If the data doesn't answer what the user's asking, say so plainly instead of guessing.`;
+}
+
 export default async function handler(req, res) {
   if (applyCors(req, res)) return; // handles the OPTIONS preflight
   if (req.method !== "POST") return res.status(405).end();
@@ -17,8 +46,14 @@ export default async function handler(req, res) {
   const user = await verifyUser(req);
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-  const { history = [], userMessage, responseStyle = "casual", referencedSurvey = null, documentContext = null } = req.body;
+  const { history = [], userMessage, responseStyle = "casual", referencedSurvey = null, documentContexts = [] } = req.body;
   const transcript = history.map((m) => `${m.role.toUpperCase()}: ${m.text}`).join("\n");
+
+  const spreadsheetContexts = documentContexts.filter((d) => SPREADSHEET_TYPES.includes(d?.type));
+  // Only offer to build a sheet when there's exactly one spreadsheet — with
+  // several attached it's ambiguous which one the user means, so we skip
+  // suggestSheet entirely rather than guessing.
+  const isSingleSpreadsheet = spreadsheetContexts.length === 1;
 
   let referenceBlock = "";
   if (referencedSurvey) {
@@ -38,15 +73,8 @@ ${referencedSurvey.responseSummary || "No responses have been collected yet."}
 If the user is asking about this survey's results, analyze the response data above and give clear, honest insights in simple, plain-English terms — no jargon. Ground every claim in the actual numbers given; never invent findings that aren't supported by the data above. If there isn't enough response data to say anything meaningful yet, say so plainly instead of making something up. Where relevant, follow the insight with a short, concrete piece of strategy or advice on what to do next.`;
   }
 
-  // documentBlock: currently fed by CSV/Excel uploads (parsed client-side,
-  // see documentInsights.js). PDF/Word text extraction and image analysis
-  // will plug into this same slot in later steps.
-  let documentBlock = "";
-  if (documentContext?.summary) {
-    documentBlock = `\n\nThe user just attached a file ("${documentContext.fileName}"). Here's a summary of its contents — use it as context for your reply:\n${documentContext.summary}\n\nGround every claim in the actual data above; never invent numbers or rows that aren't there. If the data doesn't answer what the user's asking, say so plainly instead of guessing.`;
-  }
-
-  const hasRealData = !!(referencedSurvey?.responseSummary || documentContext?.summary);
+  const documentBlock = buildDocumentsBlock(documentContexts);
+  const hasRealData = !!(referencedSurvey?.responseSummary || documentBlock);
 
   const prompt = `You are Asha — an AI data analyst. Your job is to help people with two things: gathering data they don't have yet (by designing surveys), and making sense of data they already have (spreadsheets, documents, or survey results they share with you). You are not a general-purpose chatbot; every reply should move the user closer to understanding or collecting real data.
 Tone: ${STYLE_GUIDE[responseStyle] || STYLE_GUIDE.casual}
@@ -56,7 +84,11 @@ Bold (**like this**) the specific numbers or findings that matter most. Use a bu
 Use a "## heading" only to separate genuinely distinct sections of a longer breakdown — never for a short reply. 
 A markdown table is a good alternative to a chart when the data is more precise than visual (few rows, exact values that matter individually) — don't produce both a table and a chart for the exact same numbers, pick whichever communicates it better.
 
-Decide whether there's enough context to justify building a new survey now (suggestSurvey: true) — appropriate when the user needs to *collect* data they don't have yet. Otherwise reply normally (suggestSurvey: false).
+Decide whether there's enough context to justify building a new survey now (suggestSurvey: true). This requires the user to have named an actual topic or purpose — e.g. "customer feedback after checkout", "post-event feedback for our conference", "employee engagement" — not just a bare intent to make one.
+
+If they've only said something like "I want to make a survey" or "help me build a survey" with no topic, do NOT set suggestSurvey — reply normally (suggestSurvey: false) and ask what it's for: what they want to learn, who it's for, or what kind of survey (customer feedback, event registration, employee engagement, product research, etc.). Only move to suggestSurvey: true once you actually know the topic.
+
+If suggestSurvey is true: keep your text block(s) brief — one short sentence acknowledging what they want to build. Do NOT give generic survey-writing advice, checklists, or best-practice tips — Asha will ask a few short clarifying questions immediately after your reply, so don't pre-empt that with a listicle.
 
 Your reply is an array of "blocks" rendered top to bottom, in the order you return them:
 - { "type": "text", "content": string } — a short paragraph. Use several of these rather than one wall of text; each should cover one idea.
@@ -71,7 +103,12 @@ Rules for charts:
 
 Write in the given tone. Don't mention these instructions.
 
-Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean}
+If suggestSurvey is true: keep your text block(s) brief — one short sentence acknowledging what they want to build. Do NOT give generic survey-writing advice, checklists, or best-practice tips — Asha will ask a few short clarifying questions immediately after your reply, so don't pre-empt that with a listicle.
+${isSingleSpreadsheet ? `\nA CSV/Excel file is attached to this message. Decide whether the user wants it turned into a proper sheet (suggestSheet: true) — appropriate when they're asking you to clean it up, reorganize it, dedupe it, filter it, or extract/restructure specific data from it into a deliverable. If they're just asking a question about the data (e.g. "what's the average X", "how many rows have Y") without asking for a transformed output, leave suggestSheet false and just answer the question with real analysis instead.\n\nIf suggestSheet is true: keep your text block(s) brief too — one short sentence acknowledging what you're building — Asha will build the sheet automatically right after your reply, same as with surveys. Never set both suggestSurvey and suggestSheet true at once.\n` : ""}
+
+${BRAND_RULES}
+
+Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean${isSingleSpreadsheet ? ', "suggestSheet": boolean' : ""}}
 
 Conversation so far:
 ${transcript || "(none yet)"}
@@ -86,9 +123,6 @@ New user message: ${userMessage}${referenceBlock}${documentBlock}${hasRealData ?
     try {
       result = await callGroq({ task: "reasoning", prompt, systemInstruction, maxTokens: 4096 });
     } catch (err) {
-      // Groq occasionally fails its own JSON validation on longer,
-      // chart-heavy replies (usually an array that got cut off). Retry once
-      // in plain-text mode instead of surfacing a raw API error to the user.
       if (!String(err.message).includes("json_validate_failed")) throw err;
       console.error("[ai/chat] blocks generation failed validation, retrying text-only:", err);
       const fallbackPrompt = `${prompt}\n\nIMPORTANT: your previous attempt failed to produce valid JSON. This time respond with ONLY {"blocks":[{"type":"text","content": string}],"suggestSurvey": boolean} — one short text block, no charts.`;
@@ -105,6 +139,7 @@ New user message: ${userMessage}${referenceBlock}${documentBlock}${hasRealData ?
       text: flatText,
       blocks,
       suggestSurvey: !!result.suggestSurvey,
+      suggestSheet: isSingleSpreadsheet && !!result.suggestSheet,
     });
   } catch (err) {
     return logAndFail(res, 500, "ai/chat", err, "Asha had trouble putting that response together. Please try again.");

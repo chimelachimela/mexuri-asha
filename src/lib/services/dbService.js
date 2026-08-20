@@ -5,6 +5,7 @@
 // tables in supabase/schema.sql. Every function is async.
 
 import { supabase } from "../supabaseClient";
+import { recommendTemplate } from "../templates/compatibility";
 
 function genSlug() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -21,11 +22,13 @@ function mapMessageRow(row) {
     suggestSurvey: row.suggest_survey,
     referencedSurveyId: row.referenced_survey_id || undefined,
     referencedSurveyTitle: row.referenced_survey_title || undefined,
-    attachmentName: row.attachment_name || undefined,
-    attachmentType: row.attachment_type || undefined,
-    attachmentSummary: row.attachment_summary || undefined,
-    attachmentPath: row.attachment_path || undefined,
+    // New rows use the attachments jsonb array; fall back to the old
+    // singular columns so messages sent before this change still render.
+    attachments: row.attachments || (row.attachment_name
+      ? [{ fileName: row.attachment_name, type: row.attachment_type, summary: row.attachment_summary, path: row.attachment_path }]
+      : []),
     blocks: row.blocks || null,
+    createdAt: row.created_at,
   };
 }
 
@@ -55,10 +58,25 @@ function mapSurveyRow(row, questions = [], responses = []) {
     description: row.description,
     coverColorSeed: row.cover_color_seed,
     status: row.status,
+    templateId: row.template_id || null,
     seenAt: row.seen_at || null,
     createdAt: row.created_at,
     questions,
     responses,
+  };
+}
+
+function mapSheetRow(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    chatId: row.chat_id || null,
+    title: row.title,
+    columns: row.columns || [],
+    rows: row.rows || [],
+    sourceFileName: row.source_file_name || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -129,10 +147,7 @@ export async function appendMessage(chatId, message) {
       suggest_survey: message.suggestSurvey || false,
       referenced_survey_id: message.referencedSurveyId || null,
       referenced_survey_title: message.referencedSurveyTitle || null,
-      attachment_name: message.attachmentName || null,
-      attachment_type: message.attachmentType || null,
-      attachment_summary: message.attachmentSummary || null,
-      attachment_path: message.attachmentPath || null,
+      attachments: message.attachments?.length ? message.attachments : null,
       blocks: message.blocks || null,
     })
     .select()
@@ -140,6 +155,36 @@ export async function appendMessage(chatId, message) {
   if (error) throw error;
   supabase.from("chats").update({ updated_at: new Date().toISOString() }).eq("id", chatId).then(() => { });
   return mapMessageRow(data);
+}
+
+// Used by regenerate (swap text/blocks on an existing assistant message)
+// and by edit (rewrite a user message's text in place).
+export async function updateMessage(messageId, patch) {
+  const row = {};
+  if (patch.text !== undefined) row.text = patch.text;
+  if (patch.blocks !== undefined) row.blocks = patch.blocks;
+  if (patch.suggestSurvey !== undefined) row.suggest_survey = patch.suggestSurvey;
+
+  const { data, error } = await supabase
+    .from("messages")
+    .update(row)
+    .eq("id", messageId)
+    .select()
+    .single();
+  if (error) throw error;
+  return mapMessageRow(data);
+}
+
+// Regenerate/edit both need to drop everything after a given point in the
+// conversation before appending the new reply, so the transcript stays a
+// single linear thread instead of branching.
+export async function deleteMessagesAfter(chatId, createdAt) {
+  const { error } = await supabase
+    .from("messages")
+    .delete()
+    .eq("chat_id", chatId)
+    .gt("created_at", createdAt);
+  if (error) throw error;
 }
 
 export async function deleteChat(chatId) {
@@ -208,7 +253,9 @@ export async function getSurveyBySlug(slug) {
   return mapSurveyRow(surveyRow, (questionRows || []).map(mapQuestionRow));
 }
 
-export async function createSurvey(userId, { title, description, coverColorSeed, questions }) {
+export async function createSurvey(userId, { title, description, coverColorSeed, questions, templateId }) {
+  const resolvedTemplateId = templateId || recommendTemplate(questions).id;
+
   const { data: surveyRow, error: surveyErr } = await supabase
     .from("surveys")
     .insert({
@@ -218,6 +265,7 @@ export async function createSurvey(userId, { title, description, coverColorSeed,
       description,
       cover_color_seed: coverColorSeed ?? Math.floor(Math.random() * 360),
       status: "draft",
+      template_id: resolvedTemplateId,
     })
     .select()
     .single();
@@ -245,8 +293,106 @@ export async function setSurveyStatus(surveyId, status) {
   return getSurvey(surveyId);
 }
 
+// Called from the template picker (build panel, survey detail page, and
+// the in-chat design suggestion card) whenever the founder swaps templates.
+export async function setSurveyTemplate(surveyId, templateId) {
+  const { error } = await supabase
+    .from("surveys")
+    .update({ template_id: templateId })
+    .eq("id", surveyId);
+  if (error) throw error;
+  return getSurvey(surveyId);
+}
+
+export async function deleteSurvey(surveyId) {
+  const { error } = await supabase.from("surveys").delete().eq("id", surveyId);
+  if (error) throw error;
+}
+
+// Manual editing from SurveyDetail: title/description plus a full
+// replacement of the question set. Simplest correct approach given
+// questions can be added/removed/reordered in the same save — delete
+// the old rows and reinsert rather than trying to diff them.
+export async function updateSurvey(surveyId, { title, description, questions }) {
+  const { error: surveyErr } = await supabase
+    .from("surveys")
+    .update({ title, description })
+    .eq("id", surveyId);
+  if (surveyErr) throw surveyErr;
+
+  const { error: delErr } = await supabase.from("questions").delete().eq("survey_id", surveyId);
+  if (delErr) throw delErr;
+
+  const questionRows = questions.map((q, i) => ({
+    survey_id: surveyId,
+    type: q.type,
+    text: q.text,
+    options: q.type !== "text" ? q.options ?? [] : null,
+    order_index: i,
+  }));
+  const { error: qErr } = await supabase.from("questions").insert(questionRows);
+  if (qErr) throw qErr;
+
+  return getSurvey(surveyId);
+}
+
 export async function submitResponse(surveyId, answers) {
   const { error } = await supabase.from("responses").insert({ survey_id: surveyId, answers });
   if (error) throw error;
   return getSurvey(surveyId);
+}
+
+// ---------- Asha Sheets ----------
+
+export async function listSheets(userId) {
+  const { data, error } = await supabase
+    .from("sheets")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data.map(mapSheetRow);
+}
+
+export async function getSheet(sheetId) {
+  const { data, error } = await supabase.from("sheets").select("*").eq("id", sheetId).single();
+  if (error) throw error;
+  return mapSheetRow(data);
+}
+
+export async function createSheet(userId, { title, columns, rows, sourceFileName, chatId }) {
+  const { data, error } = await supabase
+    .from("sheets")
+    .insert({
+      user_id: userId,
+      chat_id: chatId || null,
+      title,
+      columns,
+      rows,
+      source_file_name: sourceFileName || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return mapSheetRow(data);
+}
+
+// Full replace of columns/rows (and optionally title) — used both by
+// manual cell edits on the Sheets detail page and by any future re-run of
+// an AI transform. updated_at is bumped explicitly since Supabase doesn't
+// auto-touch it on update.
+export async function updateSheet(sheetId, { title, columns, rows }) {
+  const patch = { updated_at: new Date().toISOString() };
+  if (title !== undefined) patch.title = title;
+  if (columns !== undefined) patch.columns = columns;
+  if (rows !== undefined) patch.rows = rows;
+
+  const { data, error } = await supabase.from("sheets").update(patch).eq("id", sheetId).select().single();
+  if (error) throw error;
+  return mapSheetRow(data);
+}
+
+export async function deleteSheet(sheetId) {
+  const { error } = await supabase.from("sheets").delete().eq("id", sheetId);
+  if (error) throw error;
 }

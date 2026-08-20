@@ -6,12 +6,13 @@ import { summarizeSurveyResponses } from "../surveyInsights";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
-async function authedPost(path, body) {
+async function authedPost(path, body, { signal } = {}) {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
@@ -20,7 +21,7 @@ async function authedPost(path, body) {
   return res.json();
 }
 
-export async function sendMessage({ history, userMessage, responseStyle = "casual", referencedSurvey = null, documentContext = null }) {
+export async function sendMessage({ history, userMessage, responseStyle = "casual", referencedSurvey = null, documentContexts = [], signal }) {
   return authedPost("/api/ai/chat", {
     history,
     userMessage,
@@ -35,12 +36,10 @@ export async function sendMessage({ history, userMessage, responseStyle = "casua
         responseSummary: summarizeSurveyResponses(referencedSurvey),
       }
       : null,
-    // documentContext.summary is already the compact text from
-    // documentInsights.js — the server just slots it into the prompt.
-    documentContext: documentContext
-      ? { fileName: documentContext.fileName, summary: documentContext.summary }
-      : null,
-  });
+    // Each summary is already the compact text from documentInsights.js —
+    // the server just slots them into the prompt.
+    documentContexts: documentContexts.map((d) => ({ fileName: d.fileName, type: d.type, summary: d.summary })),
+  }, { signal });
 }
 
 export async function generateChatTitle(firstMessage) {
@@ -52,14 +51,24 @@ export async function generateSurvey({ chatContext }) {
   return authedPost("/api/ai/generate-survey", { chatContext });
 }
 
+// summary is the compact column-stats/sample text from documentInsights.js
+// — never the full dataset. Returns { title, operations } for
+// sheetTransform.js to apply to the real, fully-parsed rows client-side.
+export async function generateSheet({ fileName, summary, instruction }) {
+  return authedPost("/api/ai/generate-sheet", { fileName, summary, instruction });
+}
+
+
 export async function generatePlanningQuestions(topic) {
   const { questions } = await authedPost("/api/ai/generate-planning-questions", { topic });
   return questions;
 }
 
-// imageUrl must be reachable by Groq's servers — a Supabase signed URL
-// (see storageService.getAttachmentUrl), not a local blob: URL.
-export async function analyzeImage(imageUrl) {
-  const { summary } = await authedPost("/api/ai/analyze-image", { imageUrl });
-  return summary;
+// imageUrls must be reachable by Groq's servers — Supabase signed URLs
+// (see storageService.getAttachmentUrl), not local blob: URLs. Analyzes
+// every image in one batched call and returns summaries in the same order.
+export async function analyzeImages(imageUrls) {
+  if (!imageUrls.length) return [];
+  const { summaries } = await authedPost("/api/ai/analyze-images", { imageUrls });
+  return summaries;
 }

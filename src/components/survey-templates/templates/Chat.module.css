@@ -1,0 +1,58 @@
+.page {
+    min-height: 100vh;
+    background: rgb(var(--color-canvas));
+    color: rgb(var(--color-ink));
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1.25rem;
+}
+
+.thread {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.pair {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.askBubble {
+    align-self: flex-start;
+    max-width: 85%;
+    font-size: 14px;
+    font-weight: 500;
+    background: rgb(var(--color-panel-2));
+    border-radius: 14px 14px 14px 4px;
+    padding: 10px 14px;
+}
+
+.answerBubble {
+    align-self: flex-end;
+    max-width: 75%;
+    font-size: 14px;
+    background: rgb(var(--color-btn));
+    color: rgb(var(--color-btn-foreground));
+    border-radius: 14px 14px 4px 14px;
+    padding: 10px 14px;
+}
+
+.inputWrap {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 85%;
+    background: rgb(var(--color-panel));
+    border: 1px solid rgb(var(--color-line));
+    border-radius: 4px 14px 14px 14px;
+    padding: 14px;
+}
+
+@media (max-width: 480px) {
+    .inputWrap {
+        max-width: 100%;
+    }
+}
