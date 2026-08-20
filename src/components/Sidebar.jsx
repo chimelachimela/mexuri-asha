@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { SquarePen, FileText, BarChart3, Settings, User, LogOut, PanelLeft, Trash2, Menu, X, MessageSquare } from "lucide-react";
+import { SquarePen, FileText, BarChart3, Settings, User, LogOut, PanelLeft, Trash2, Menu, X, MessageSquare, Table2 } from "lucide-react";
 import { useApp } from "../context/AppContext";
+import ConfirmModal from "./ConfirmModal";
 
 const NAV_ITEMS = [
   { id: "new", label: "New Chat", icon: SquarePen, action: "newChat" },
   { id: "surveys", label: "Surveys", icon: FileText, path: "/surveys" },
+  { id: "sheets", label: "Asha Sheets", icon: Table2, path: "/sheets" },
   { id: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics" },
   { id: "settings", label: "Settings", icon: Settings, path: "/settings" },
 ];
@@ -15,6 +17,7 @@ export default function Sidebar({ activeChat, onSelectChat, onNewChat, onDeleteC
   const location = useLocation();
   const { session, signOut, chats, theme, unseenSurveyCount } = useApp();
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [deleteChatId, setDeleteChatId] = useState(null); // chat id pending delete confirmation
 
   // Mobile overlay open/close — independent of the desktop `collapsed`
   // width toggle. Kept local so no parent page needs to manage it.
@@ -32,14 +35,21 @@ export default function Sidebar({ activeChat, onSelectChat, onNewChat, onDeleteC
   }
 
   function handleSelectChat(id) {
-    onSelectChat ? onSelectChat(id) : navigate(`/chat/${id}`);
+    if (onSelectChat) {
+      onSelectChat(id);
+    } else {
+      navigate(`/chat/${id}`);
+    }
   }
 
   function handleDelete(e, chatId) {
     e.stopPropagation();
-    if (window.confirm("Delete this chat? This can't be undone.")) {
-      onDeleteChat?.(chatId);
-    }
+    setDeleteChatId(chatId);
+  }
+
+  function confirmDeleteChat() {
+    onDeleteChat?.(deleteChatId);
+    setDeleteChatId(null);
   }
 
   const width = collapsed ? "w-[72px]" : "w-[260px]";
@@ -202,6 +212,17 @@ export default function Sidebar({ activeChat, onSelectChat, onNewChat, onDeleteC
       >
         {body}
       </aside>
+
+      {deleteChatId && (
+        <ConfirmModal
+          title="Delete this chat?"
+          description="This can't be undone."
+          confirmLabel="Delete"
+          danger
+          onConfirm={confirmDeleteChat}
+          onCancel={() => setDeleteChatId(null)}
+        />
+      )}
     </>
   );
 }

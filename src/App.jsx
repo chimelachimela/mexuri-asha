@@ -11,6 +11,8 @@ import Settings from "./pages/Settings";
 import PublicSurvey from "./pages/PublicSurvey";
 import { TERMS_VERSION } from "./data/termsContent";
 import TermsGate from "./components/TermGate";
+import Sheets from "./pages/Sheets";
+import SheetDetail from "./pages/SheetDetail";
 
 function RequireAuth({ children }) {
   const { session } = useApp();
@@ -85,6 +87,22 @@ function Routed() {
         element={
           <RequireAuth>
             <SurveyDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/sheets"
+        element={
+          <RequireAuth>
+            <Sheets />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/sheets/:sheetId"
+        element={
+          <RequireAuth>
+            <SheetDetail />
           </RequireAuth>
         }
       />

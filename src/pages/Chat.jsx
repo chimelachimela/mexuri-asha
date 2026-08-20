@@ -10,8 +10,10 @@ import SurveyPickerModal from "../components/SurveyPickerModal";
 import * as db from "../lib/services/dbService";
 import * as ai from "../lib/services/aiService";
 import { parseSpreadsheetFile, summarizeSpreadsheet } from "../lib/documentInsights";
+import { recommendTemplate } from "../lib/templates/compatibility";
 import { uploadAttachment, getAttachmentUrl } from "../lib/services/storageService";
 import AttachmentPreview from "../components/AttachmentPreview";
+import { applySheetTransform } from "../lib/sheetTransform";
 
 // ---------- inline SVG icons (replaces lucide-react) ----------
 function IconPlus({ size = 17, className = "" }) {
@@ -27,6 +29,14 @@ function IconSend({ size = 15, className = "" }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" />
       <path d="M6 12h16" />
+    </svg>
+  );
+}
+
+function IconStop({ size = 13, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
     </svg>
   );
 }
@@ -101,6 +111,8 @@ const IDLE_PROMPTS = [
   "Create a quick employee engagement survey",
   "Ask my users what feature they want next",
 ];
+
+const MAX_ATTACHMENTS = 5;
 
 function useIdlePlaceholder(active) {
   const [text, setText] = useState("Ask Asha…");
@@ -211,22 +223,26 @@ function useIsMobile() {
 // ---------- end mobile keyboard awareness ----------
 
 export default function Chat() {
-  const { session, chats, addChatToList, upsertChatMeta, removeChatFromList, addSurveyToList } = useApp();
+  const { session, addChatToList, upsertChatMeta, removeChatFromList, addSurveyToList, addSheetToList } = useApp();
   const { chatId } = useParams();
   const navigate = useNavigate();
 
   const [activeChat, setActiveChat] = useState(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [planningLoading, setPlanningLoading] = useState(false);
+  const [draftingSurvey, setDraftingSurvey] = useState(false); // drafting + choosing a design suggestion, after planning Qs
+  const [thinkingLabel, setThinkingLabel] = useState("Thinking"); // "Thinking" | "Analyzing" — shown next to the reply dots
 
   const [mySurveys, setMySurveys] = useState([]);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [surveyModalOpen, setSurveyModalOpen] = useState(false);
   const [referencedSurvey, setReferencedSurvey] = useState(null);
-  const [attachedDocument, setAttachedDocument] = useState(null); // { fileName, type, summary }
+  const [attachedDocuments, setAttachedDocuments] = useState([]); // [{ localId, fileName, type, summary, storagePath, previewUrl, fullData?, pendingAnalysis? }]
   const [attaching, setAttaching] = useState(false);
   const [attachingStage, setAttachingStage] = useState(""); // "uploading" | "analyzing"
 
@@ -237,6 +253,9 @@ export default function Chat() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const scrollRef = useRef(null);
+  // One AbortController for whichever request is currently in flight
+  // (a fresh send, a regenerate, or an edit-resend) — Stop just aborts it.
+  const abortRef = useRef(null);
 
   // keyboard-aware fixed composer (mobile only)
   const isMobile = useIsMobile();
@@ -313,60 +332,70 @@ export default function Chat() {
     setReferencedSurvey(null);
   }
 
-  function clearAttachment() {
-    if (attachedDocument?.previewUrl) URL.revokeObjectURL(attachedDocument.previewUrl);
-    setAttachedDocument(null);
+  function withSpreadsheetSummaries(docs) {
+    const idx = docs.map((d, i) => (d.rawSpreadsheet ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) return docs;
+    const summaries = idx.map((i) => summarizeSpreadsheet(docs[i].rawSpreadsheet));
+    const next = [...docs];
+    idx.forEach((i, k) => { next[i] = { ...next[i], summary: summaries[k], fullData: docs[i].rawSpreadsheet }; });
+    return next;
   }
 
-  async function handleAttachFile(file) {
-    if (!file) return;
-    setAttaching(true);
-    setAttachingStage("uploading");
-    setErrorMsg("");
-    const isImage = file.type.startsWith("image/");
-    const previewUrl = isImage ? URL.createObjectURL(file) : null;
+  function clearAttachment(localId) {
+    setAttachedDocuments((prev) => {
+      const doc = prev.find((d) => d.localId === localId);
+      if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
+      return withSpreadsheetSummaries(prev.filter((d) => d.localId !== localId));
+    });
+  }
 
-    try {
-      const storagePath = await uploadAttachment(file, session.id);
+  async function handleAttachFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
 
-      if (isImage) {
-        // Show the attachment immediately (preview + "analyzing" state)
-        // rather than blocking on the vision call before anything appears.
-        setAttachedDocument({ fileName: file.name, type: "image", summary: null, storagePath, previewUrl });
-        setAttachingStage("analyzing");
-        try {
-          // Groq's servers need to fetch this over the internet — a signed
-          // URL into the private bucket, not the local blob: preview URL.
-          const signedUrl = await getAttachmentUrl(storagePath);
-          const summary = await ai.analyzeImage(signedUrl);
-          setAttachedDocument((prev) =>
-            prev?.storagePath === storagePath ? { ...prev, summary } : prev
-          );
-        } catch (err) {
-          // Non-fatal: the image stays attached and visible, just without
-          // an AI-readable summary — chat.js simply won't build a
-          // documentBlock for it (same as any attachment with no summary).
-          console.error("Image analysis failed:", err);
-          setErrorMsg("Attached the image, but couldn't analyze it — Asha won't be able to reference its contents.");
-        }
-      } else {
-        const { columns, rows } = await parseSpreadsheetFile(file);
-        const summary = summarizeSpreadsheet({ fileName: file.name, columns, rows });
-        setAttachedDocument({
-          fileName: file.name,
-          type: file.name.split(".").pop().toLowerCase(),
-          summary,
-          storagePath,
-          previewUrl: null,
-        });
-      }
-    } catch (err) {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setErrorMsg(err.message || "Couldn't attach that file.");
-    } finally {
-      setAttaching(false);
-      setAttachingStage("");
+    const room = MAX_ATTACHMENTS - attachedDocuments.length;
+    if (room <= 0) {
+      setErrorMsg(`You can attach up to ${MAX_ATTACHMENTS} files per message.`);
+      return;
     }
+    const toAttach = files.slice(0, room);
+    setErrorMsg(files.length > toAttach.length ? `Only added ${toAttach.length} of ${files.length} files — ${MAX_ATTACHMENTS} per message max.` : "");
+    setAttaching(true);
+
+    for (const file of toAttach) {
+      const isImage = file.type.startsWith("image/");
+      const previewUrl = isImage ? URL.createObjectURL(file) : null;
+      const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      try {
+        const storagePath = await uploadAttachment(file, session.id);
+
+        if (isImage) {
+          // Analysis is deferred to send time and batched across every
+          // attached image in one call — see handleSend. This is where the
+          // token saving actually happens, so we don't spend it here.
+          setAttachedDocuments((prev) => [
+            ...prev,
+            { localId, fileName: file.name, type: "image", summary: null, storagePath, previewUrl, pendingAnalysis: true },
+          ]);
+        } else {
+          const { columns, rows } = await parseSpreadsheetFile(file);
+          setAttachedDocuments((prev) => withSpreadsheetSummaries([
+            ...prev,
+            { localId, fileName: file.name, type: file.name.split(".").pop().toLowerCase(), storagePath, previewUrl: null, rawSpreadsheet: { columns, rows } },
+          ]));
+        }
+      } catch (err) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setErrorMsg(err.message || `Couldn't attach "${file.name}".`);
+      }
+    }
+
+    setAttaching(false);
+  }
+
+  function stopSending() {
+    abortRef.current?.abort();
   }
 
   async function handleSend() {
@@ -375,6 +404,27 @@ export default function Chat() {
     setInput("");
     setErrorMsg("");
     setSending(true);
+    // Analyze every pending image together, in one call, before sending —
+    // this is the "all uploads at the same time" step.
+    let docs = attachedDocuments;
+    const pendingImages = docs.filter((d) => d.pendingAnalysis);
+    if (pendingImages.length) {
+      setThinkingLabel("Analyzing");
+      try {
+        const signedUrls = await Promise.all(pendingImages.map((d) => getAttachmentUrl(d.storagePath)));
+        const summaries = await ai.analyzeImages(signedUrls);
+        docs = docs.map((d) => {
+          const i = pendingImages.findIndex((p) => p.localId === d.localId);
+          return i === -1 ? d : { ...d, summary: summaries[i] || null, pendingAnalysis: false };
+        });
+      } catch (err) {
+        console.error("Image analysis failed:", err);
+        setErrorMsg("Attached image(s) couldn't be analyzed — Asha will reply without reading them.");
+        docs = docs.map((d) => (d.pendingAnalysis ? { ...d, pendingAnalysis: false } : d));
+      }
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       let chat = activeChat;
@@ -390,28 +440,30 @@ export default function Chat() {
         text,
         referencedSurveyId: referencedSurvey?.id,
         referencedSurveyTitle: referencedSurvey?.title,
-        attachmentName: attachedDocument?.fileName,
-        attachmentType: attachedDocument?.type,
-        attachmentSummary: attachedDocument?.summary,
-        attachmentPath: attachedDocument?.storagePath,
+        attachments: docs.map((d) => ({ fileName: d.fileName, type: d.type, summary: d.summary, path: d.storagePath })),
       });
-      const localPreviewUrl = attachedDocument?.type === "image" ? attachedDocument.previewUrl : undefined;
-      chat = { ...chat, messages: [...chat.messages, { ...userMsg, previewUrl: localPreviewUrl }] };
+      const previewByPath = new Map(docs.filter((d) => d.type === "image").map((d) => [d.storagePath, d.previewUrl]));
+      chat = {
+        ...chat,
+        messages: [...chat.messages, { ...userMsg, attachments: userMsg.attachments?.map((a) => ({ ...a, previewUrl: previewByPath.get(a.path) })) }],
+      };
       setActiveChat(chat);
-      const sentDocument = attachedDocument;
-      setAttachedDocument(null); // clear once it's attached to this message, same as a reference would be
+      const sentDocuments = docs;
+      setAttachedDocuments([]);
 
-      // Title generation and the AI reply are independent — run them
-      // together instead of waiting on one before starting the other.
+      setThinkingLabel(sentDocuments.length || referencedSurvey ? "Analyzing" : "Thinking");
       const titlePromise = !chat.titleLocked ? ai.generateChatTitle(text) : Promise.resolve(null);
       const replyPromise = ai.sendMessage({
         history: chat.messages,
         userMessage: text,
         responseStyle: session.responseStyle,
         referencedSurvey: referencedSurvey || null,
-        documentContext: sentDocument ? { fileName: sentDocument.fileName, summary: sentDocument.summary } : null,
+        documentContexts: sentDocuments.filter((d) => d.summary).map((d) => ({ fileName: d.fileName, type: d.type, summary: d.summary })),
+        signal: controller.signal,
       });
 
+      // Title generation and the AI reply are independent — run them
+      // together instead of waiting on one before starting the other.
       const [title, reply] = await Promise.all([titlePromise, replyPromise]);
 
       if (title) {
@@ -429,11 +481,182 @@ export default function Chat() {
       chat = { ...chat, messages: [...chat.messages, assistantMsg] };
       setActiveChat(chat);
       upsertChatMeta(chat.id, { title: chat.title });
+
+      // Ask the defining/planning questions right away instead of waiting
+      // for a manual "Start Survey" click — Asha should understand the
+      // survey before building it, not after an extra step.
+      if (reply.suggestSurvey && !chat.surveyDraftId) {
+        handleStartSurvey(chat.messages);
+      } else if (reply.suggestSheet) {
+        // Same "no extra click" philosophy as surveys — build the sheet
+        // right after the acknowledgment reply. The AI only decided WHICH
+        // operations to run (see generate-sheet.js); applying them to the
+        // full dataset happens here, in plain JS, so this stays fast no
+        // matter how many rows the source file actually has.
+        // With multiple attachments possible, use the first spreadsheet
+        // doc in this send as the source for the sheet.
+        const sentDocument = sentDocuments.find((d) => d.fullData);
+        if (sentDocument) {
+          setThinkingLabel("Organizing");
+          try {
+            const { title: sheetTitle, operations } = await ai.generateSheet({
+              fileName: sentDocument.fileName,
+              summary: sentDocument.summary,
+              instruction: text,
+            });
+            const { columns, rows } = applySheetTransform(sentDocument.fullData, operations);
+            const sheet = await db.createSheet(session.id, {
+              title: sheetTitle,
+              columns,
+              rows,
+              sourceFileName: sentDocument.fileName,
+              chatId: chat.id,
+            });
+            addSheetToList(sheet);
+
+            const sheetMsg = await db.appendMessage(chat.id, {
+              role: "assistant",
+              text: `Here's your sheet: "${sheet.title}".`,
+              blocks: [
+                { type: "text", content: `Here's your sheet: **${sheet.title}**.` },
+                { type: "sheet", sheetId: sheet.id, title: sheet.title, columns: sheet.columns, rows: sheet.rows },
+              ],
+            });
+            setActiveChat((c) => ({ ...c, messages: [...c.messages, sheetMsg] }));
+          } catch (err) {
+            console.error(err);
+            setErrorMsg(err.message || "Couldn't build that sheet. Please try again.");
+          }
+        }
+      }
     } catch (err) {
-      console.error(err);
-      setErrorMsg(err.message || "Something went wrong reaching Asha. Please try again.");
+      if (err.name === "AbortError") {
+        // User hit Stop — the user message they sent stays in the thread,
+        // it just never got a reply. Nothing else to clean up.
+      } else {
+        console.error(err);
+        setErrorMsg(err.message || "Something went wrong reaching Asha. Please try again.");
+      }
     } finally {
       setSending(false);
+      abortRef.current = null;
+    }
+  }
+
+  // Re-asks Asha using everything up to (but not including) the target
+  // assistant message, then swaps that message's content in place — the
+  // rest of the thread, and the DB row's id/position, stay untouched.
+  async function handleRegenerate(messageId) {
+    if (sending || regeneratingId || editingId) return;
+    const messages = activeChat?.messages || [];
+    const targetIndex = messages.findIndex((m) => m.id === messageId);
+    if (targetIndex === -1) return;
+
+    const priorHistory = messages.slice(0, targetIndex);
+    const lastUserMsg = [...priorHistory].reverse().find((m) => m.role === "user");
+    if (!lastUserMsg) return;
+
+    setRegeneratingId(messageId);
+    setErrorMsg("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const reply = await ai.sendMessage({
+        history: priorHistory,
+        userMessage: lastUserMsg.text,
+        responseStyle: session.responseStyle,
+        referencedSurvey: referencedSurvey || null,
+        signal: controller.signal,
+      });
+
+      const updated = await db.updateMessage(messageId, {
+        text: reply.text,
+        blocks: reply.blocks,
+        suggestSurvey: reply.suggestSurvey,
+      });
+
+      setActiveChat((chat) => ({
+        ...chat,
+        messages: chat.messages.map((m) => (m.id === messageId ? { ...m, ...updated } : m)),
+      }));
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error(err);
+        setErrorMsg(err.message || "Couldn't regenerate that response. Please try again.");
+      }
+    } finally {
+      setRegeneratingId(null);
+      abortRef.current = null;
+    }
+  }
+
+  // Regenerating a USER message means re-running whatever assistant reply
+  // followed it (the user's own text doesn't change) — so this just finds
+  // that reply and reuses handleRegenerate.
+  function handleRegenerateFromUserMessage(userMessageId) {
+    const messages = activeChat?.messages || [];
+    const idx = messages.findIndex((m) => m.id === userMessageId);
+    const next = messages[idx + 1];
+    if (next?.role === "assistant") handleRegenerate(next.id);
+  }
+
+  // messageId === null closes the editor without saving.
+  async function handleEditMessage(messageId, newText) {
+    if (messageId === null) {
+      setEditingId(null);
+      return;
+    }
+    if (newText === undefined) {
+      setEditingId(messageId); // open the editor
+      return;
+    }
+    if (sending || regeneratingId) return;
+
+    const messages = activeChat?.messages || [];
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+    const target = messages[idx];
+
+    setSending(true);
+    setEditingId(null);
+    setErrorMsg("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const updatedMsg = await db.updateMessage(messageId, { text: newText });
+      // Drop everything that came after the edited message — an edit
+      // restarts the thread from that point, it doesn't fork it.
+      await db.deleteMessagesAfter(activeChat.id, target.createdAt);
+
+      const truncated = messages.slice(0, idx + 1).map((m) => (m.id === messageId ? { ...m, ...updatedMsg } : m));
+      let chat = { ...activeChat, messages: truncated };
+      setActiveChat(chat);
+
+      const reply = await ai.sendMessage({
+        history: truncated.slice(0, idx),
+        userMessage: newText,
+        responseStyle: session.responseStyle,
+        referencedSurvey: referencedSurvey || null,
+        signal: controller.signal,
+      });
+
+      const assistantMsg = await db.appendMessage(chat.id, {
+        role: "assistant",
+        text: reply.text,
+        blocks: reply.blocks,
+        suggestSurvey: reply.suggestSurvey,
+      });
+      chat = { ...chat, messages: [...chat.messages, assistantMsg] };
+      setActiveChat(chat);
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error(err);
+        setErrorMsg(err.message || "Couldn't save that edit. Please try again.");
+      }
+    } finally {
+      setSending(false);
+      abortRef.current = null;
     }
   }
 
@@ -441,11 +664,13 @@ export default function Chat() {
     return (activeChat?.messages || []).map((m) => `${m.role}: ${m.text}`).join("\n");
   }
 
-  async function handleStartSurvey() {
+  async function handleStartSurvey(messagesOverride) {
     setPlanningLoading(true);
     setErrorMsg("");
     try {
-      const questions = await ai.generatePlanningQuestions(conversationTranscript());
+      const source = messagesOverride || activeChat?.messages || [];
+      const transcript = source.map((m) => `${m.role}: ${m.text}`).join("\n");
+      const questions = await ai.generatePlanningQuestions(transcript);
       setPlanningQuestions(questions);
       setPlanningIndex(0);
       setPlanningAnswers({});
@@ -458,12 +683,13 @@ export default function Chat() {
   }
 
   async function handlePlanningComplete(answers) {
+    const askedQuestions = planningQuestions || [];
     setPlanningQuestions(null);
-    setBuildPanel({ building: true, survey: null });
+    setDraftingSurvey(true);
     setErrorMsg("");
 
     try {
-      const planningQA = (planningQuestions || [])
+      const planningQA = askedQuestions
         .map((q) => `Q: ${q.text}\nA: ${answers[q.id] || "(skipped)"}`)
         .join("\n\n");
 
@@ -476,11 +702,59 @@ export default function Chat() {
       ].join("\n");
 
       const drafted = await ai.generateSurvey({ chatContext });
-      const survey = await db.createSurvey(session.id, drafted);
+      const recommended = recommendTemplate(drafted.questions);
+
+      const suggestionMsg = await db.appendMessage(activeChat.id, {
+        role: "assistant",
+        text: `I've drafted "${drafted.title}". Pick a design direction and I'll build it.`,
+        blocks: [
+          { type: "text", content: `I've drafted **${drafted.title}**. Pick a design direction and I'll build it.` },
+          {
+            type: "templateSuggestion",
+            draft: drafted,
+            questions: drafted.questions,
+            templateId: recommended.id,
+            locked: false,
+          },
+        ],
+      });
+      setActiveChat((chat) => ({ ...chat, messages: [...chat.messages, suggestionMsg] }));
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || "Couldn't draft the survey. Please try again.");
+    } finally {
+      setDraftingSurvey(false);
+    }
+  }
+
+  // Fires when the founder picks a template on the in-chat design
+  // suggestion card — this is the moment the survey actually gets created.
+  async function handleConfirmDesign(messageId, templateId, draft) {
+    setBuildPanel({ building: true, survey: null });
+    setErrorMsg("");
+
+    try {
+      const survey = await db.createSurvey(session.id, { ...draft, templateId });
       await db.updateChat(activeChat.id, { surveyDraftId: survey.id });
       setBuildPanel({ building: false, survey });
       setMySurveys((prev) => [survey, ...prev]);
       addSurveyToList(survey);
+
+      // Lock the card in place so it reads as decided rather than still pickable.
+      const msg = activeChat.messages.find((m) => m.id === messageId);
+      let updatedMsg = msg;
+      if (msg?.blocks) {
+        const newBlocks = msg.blocks.map((b) =>
+          b.type === "templateSuggestion" ? { ...b, templateId, locked: true } : b
+        );
+        updatedMsg = await db.updateMessage(messageId, { blocks: newBlocks });
+      }
+
+      setActiveChat((chat) => ({
+        ...chat,
+        surveyDraftId: survey.id,
+        messages: chat.messages.map((m) => (m.id === messageId ? updatedMsg : m)),
+      }));
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || "Couldn't build the survey. Please try again.");
@@ -518,7 +792,7 @@ export default function Chat() {
         <div className="flex-1 min-w-0 flex flex-col relative">
           {/* header */}
           <div className="flex items-center justify-between px-6 py-4 shrink-0">
-            {/* <UpgradePill onClick={() => setShowPaymentModal(true)} /> */}
+            <UpgradePill onClick={() => setShowPaymentModal(true)} />
             <button
               onClick={handleNewChat}
               title="New chat"
@@ -550,6 +824,7 @@ export default function Chat() {
                   input={input}
                   setInput={setInput}
                   onSend={handleSend}
+                  onStop={stopSending}
                   sending={sending}
                   centered
                   mySurveys={mySurveys}
@@ -561,8 +836,8 @@ export default function Chat() {
                   surveyModalOpen={surveyModalOpen}
                   onOpenSurveyModal={openSurveyModal}
                   onCloseSurveyModal={() => setSurveyModalOpen(false)}
-                  attachedDocument={attachedDocument}
-                  onAttachFile={handleAttachFile}
+                  attachedDocuments={attachedDocuments}
+                  onAttachFiles={handleAttachFiles}
                   onClearAttachment={clearAttachment}
                   attaching={attaching}
                   attachingStage={attachingStage}
@@ -578,13 +853,26 @@ export default function Chat() {
               >
                 <div className="max-w-3xl mx-auto space-y-6">
                   {activeChat.messages.map((m) => (
-                    <ChatMessage key={m.id} message={m} onStartSurvey={handleStartSurvey} />
+                    <ChatMessage
+                      key={m.id}
+                      message={m}
+                      onConfirmDesign={handleConfirmDesign}
+                      surveyBuilt={!!activeChat.surveyDraftId}
+                      onRegenerate={m.role === "user" ? handleRegenerateFromUserMessage : handleRegenerate}
+                      regenerating={regeneratingId === m.id || (m.role === "user" && regeneratingId === activeChat.messages[activeChat.messages.findIndex(x => x.id === m.id) + 1]?.id)}
+                      onEdit={handleEditMessage}
+                      editing={editingId === m.id}
+                      busy={sending || !!regeneratingId || !!editingId}
+                    />
                   ))}
                   {sending && (
-                    <div className="flex items-center gap-1.5 text-ink/30">
-                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft [animation-delay:150ms]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft [animation-delay:300ms]" />
+                    <div className="flex items-center gap-2 text-ink/30">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft [animation-delay:150ms]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulseSoft [animation-delay:300ms]" />
+                      </div>
+                      <span className="text-xs">{thinkingLabel}…</span>
                     </div>
                   )}
                 </div>
@@ -605,7 +893,9 @@ export default function Chat() {
               >
                 <div className="max-w-2xl mx-auto">
                   {planningLoading ? (
-                    <PlanningPreloader />
+                    <StatusPreloader label="Thinking" description="Asha is thinking through what to ask…" />
+                  ) : draftingSurvey ? (
+                    <StatusPreloader label="Designing" description="Asha is designing your survey…" />
                   ) : planningQuestions ? (
                     <PlanningComposer
                       questions={planningQuestions}
@@ -621,6 +911,7 @@ export default function Chat() {
                       input={input}
                       setInput={setInput}
                       onSend={handleSend}
+                      onStop={stopSending}
                       sending={sending}
                       mySurveys={mySurveys}
                       referencedSurvey={referencedSurvey}
@@ -631,8 +922,8 @@ export default function Chat() {
                       surveyModalOpen={surveyModalOpen}
                       onOpenSurveyModal={openSurveyModal}
                       onCloseSurveyModal={() => setSurveyModalOpen(false)}
-                      attachedDocument={attachedDocument}
-                      onAttachFile={handleAttachFile}
+                      attachedDocuments={attachedDocuments}
+                      onAttachFiles={handleAttachFiles}
                       onClearAttachment={clearAttachment}
                       attaching={attaching}
                       attachingStage={attachingStage}
@@ -659,10 +950,10 @@ export default function Chat() {
 const TEXTAREA_MAX_HEIGHT = 500;
 
 function Composer({
-  input, setInput, onSend, sending, centered, mySurveys, referencedSurvey,
+  input, setInput, onSend, onStop, sending, centered, mySurveys, referencedSurvey,
   onPickReference, onClearReference,
   plusMenuOpen, onTogglePlusMenu, surveyModalOpen, onOpenSurveyModal, onCloseSurveyModal,
-  attachedDocument, onAttachFile, onClearAttachment, attaching, attachingStage,
+  attachedDocuments, onAttachFiles, onClearAttachment, attaching, attachingStage,
 }) {
   const textareaRef = useRef(null);
   const docInputRef = useRef(null);
@@ -698,23 +989,27 @@ function Composer({
           </button>
         </div>
       )}
-      {attachedDocument && (
-        <div className="mb-2 flex items-center gap-2">
-          <AttachmentPreview
-            fileName={attachedDocument.fileName}
-            type={attachedDocument.type}
-            previewUrl={attachedDocument.previewUrl}
-            onClear={onClearAttachment}
-          />
-          {attaching && attachingStage === "analyzing" && (
-            <span className="text-xs text-ink/50 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-ink/40 animate-pulse" />
-              Reading image…
-            </span>
-          )}
+      {attachedDocuments.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {attachedDocuments.map((doc) => (
+            <div key={doc.localId} className="flex items-center gap-1.5">
+              <AttachmentPreview
+                fileName={doc.fileName}
+                type={doc.type}
+                previewUrl={doc.previewUrl}
+                onClear={() => onClearAttachment(doc.localId)}
+              />
+              {doc.pendingAnalysis && attaching && attachingStage === "analyzing" && (
+                <span className="text-xs text-ink/50 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-ink/40 animate-pulse" />
+                  Reading image…
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
-      {attaching && !attachedDocument && (
+      {attaching && attachingStage === "uploading" && (
         <div className="flex items-center gap-2 mb-2 bg-panel2 border border-line rounded-lg px-2.5 py-1.5 w-fit">
           <span className="text-xs text-ink/50">Uploading…</span>
         </div>
@@ -749,10 +1044,10 @@ function Composer({
             ref={docInputRef}
             type="file"
             accept=".csv,.xlsx,.xls"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onAttachFile(file);
+              onAttachFiles(e.target.files);
               e.target.value = "";
             }}
           />
@@ -760,10 +1055,10 @@ function Composer({
             ref={imageInputRef}
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onAttachFile(file);
+              onAttachFiles(e.target.files);
               e.target.value = "";
             }}
           />
@@ -793,11 +1088,12 @@ function Composer({
         </div>
 
         <button
-          onClick={onSend}
-          disabled={!input.trim() || sending}
+          onClick={sending ? onStop : onSend}
+          disabled={!sending && !input.trim()}
           className="focus-ring w-8 h-8 rounded-full bg-accent flex items-center justify-center disabled:opacity-40 transition hover:bg-accent-soft"
+          title={sending ? "Stop" : "Send"}
         >
-          <IconSend size={15} />
+          {sending ? <IconStop size={13} /> : <IconSend size={15} />}
         </button>
       </div>
 
@@ -881,11 +1177,14 @@ function PlanningComposer({ questions, index, setIndex, answers, setAnswers, onC
   );
 }
 
-function PlanningPreloader() {
+function StatusPreloader({ label, description }) {
   return (
     <div className="bg-panel border border-line rounded-2xl p-4 shadow-modal flex items-center gap-3">
       <IconLoader size={16} className="animate-spin text-accent-soft" />
-      <p className="text-sm text-ink/50">Asha is preparing a few quick questions…</p>
+      <div>
+        <p className="text-sm text-ink/70 font-medium">{label}…</p>
+        <p className="text-xs text-ink/40">{description}</p>
+      </div>
     </div>
   );
 }

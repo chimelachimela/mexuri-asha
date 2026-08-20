@@ -4,7 +4,6 @@
 // onboarding screen to mount, which could miss it entirely.
 
 let deferredPrompt = null;
-let installed = false;
 const listeners = new Set();
 
 function emit() {
@@ -18,7 +17,6 @@ window.addEventListener("beforeinstallprompt", (e) => {
 });
 
 window.addEventListener("appinstalled", () => {
-    installed = true;
     deferredPrompt = null;
     emit();
 });

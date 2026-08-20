@@ -1,8 +1,8 @@
-// documentInsights.js — parses a spreadsheet file client-side and produces
-// a compact plain-text summary to hand to the AI, the same role
+// documentInsights.js — parses spreadsheet files client-side and produces
+// compact plain-text summaries to hand to the AI, the same role
 // surveyInsights.js's summarizeSurveyResponses plays for referenced surveys.
 //
-// We send this summary, not the raw rows, for the same reason: it keeps the
+// We send summaries, not raw rows, for the same reason: it keeps the
 // request small and fast, and gives the model something it can actually
 // reason over instead of drowning in a full dataset dump.
 
@@ -10,7 +10,13 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 
 const MAX_SAMPLE_ROWS = 10;
-const MAX_SUMMARY_CHARS = 6000; // keep the prompt payload bounded
+const MAX_SUMMARY_CHARS = 6000; // ceiling for a single attached file
+
+// When several spreadsheets are attached to the same message, they share
+// this budget instead of each getting the full single-file ceiling above —
+// otherwise 5 attached files would mean 5x the prompt size for no benefit.
+const TOTAL_SUMMARY_BUDGET_CHARS = 7000;
+const MIN_PER_FILE_CHARS = 900; // floor so a summary isn't trimmed into uselessness
 
 // Returns { columns: string[], rows: object[] } from a File.
 export async function parseSpreadsheetFile(file) {
@@ -70,7 +76,9 @@ function summarizeColumn(rows, col) {
 }
 
 // fileName/columns/rows -> compact text block for the AI prompt.
-export function summarizeSpreadsheet({ fileName, columns, rows }) {
+// maxChars/maxSampleRows let callers shrink the summary when several files
+// share one message — see summarizeSpreadsheets below.
+export function summarizeSpreadsheet({ fileName, columns, rows, maxChars = MAX_SUMMARY_CHARS, maxSampleRows = MAX_SAMPLE_ROWS }) {
     if (!rows.length) return `${fileName}: file appears to be empty.`;
 
     const lines = [
@@ -80,10 +88,24 @@ export function summarizeSpreadsheet({ fileName, columns, rows }) {
         "Column summary:",
         ...columns.map((c) => `- ${summarizeColumn(rows, c)}`),
         "",
-        `Sample rows (first ${Math.min(MAX_SAMPLE_ROWS, rows.length)}):`,
-        ...rows.slice(0, MAX_SAMPLE_ROWS).map((r) => JSON.stringify(r)),
+        `Sample rows (first ${Math.min(maxSampleRows, rows.length)}):`,
+        ...rows.slice(0, maxSampleRows).map((r) => JSON.stringify(r)),
     ];
 
     const text = lines.join("\n");
-    return text.length > MAX_SUMMARY_CHARS ? text.slice(0, MAX_SUMMARY_CHARS) + "\n...(truncated)" : text;
+    return text.length > maxChars ? text.slice(0, maxChars) + "\n...(truncated)" : text;
+}
+
+// Batch version: summarizes several parsed spreadsheets at once, splitting
+// a shared char/row budget between them so total prompt size stays roughly
+// flat whether one file or five is attached. files: [{ fileName, columns, rows }]
+// -> string[] summaries, same order as input.
+export function summarizeSpreadsheets(files) {
+    if (!files.length) return [];
+    if (files.length === 1) return [summarizeSpreadsheet(files[0])];
+
+    const perFileChars = Math.max(MIN_PER_FILE_CHARS, Math.floor(TOTAL_SUMMARY_BUDGET_CHARS / files.length));
+    const perFileSampleRows = Math.max(3, Math.floor(MAX_SAMPLE_ROWS / Math.min(files.length, 4)));
+
+    return files.map((f) => summarizeSpreadsheet({ ...f, maxChars: perFileChars, maxSampleRows: perFileSampleRows }));
 }

@@ -1,26 +1,48 @@
-import { useState, useEffect } from "react";
-import { Copy, Check, ThumbsUp, ThumbsDown, Share2, RotateCw, MoreHorizontal, ArrowRight, FileText } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Copy, Check, ThumbsUp, ThumbsDown, RotateCw, FileText, Pencil } from "lucide-react";
 import ChatChart from "./ChatChart";
+import TemplateSuggestionCard from "./survey-templates/TemplateSuggestionCard";
 import AttachmentPreview from "./AttachmentPreview";
 import MarkdownText from "./MarkdownText";
 import { getAttachmentUrl } from "../lib/services/storageService";
+import SheetPreviewCard from "./SheetPreviewCard";
 
-function AttachedFile({ message }) {
-  const [previewUrl, setPreviewUrl] = useState(message.previewUrl || null);
+function AttachmentItem({ attachment }) {
+  const [previewUrl, setPreviewUrl] = useState(attachment.previewUrl || null);
 
   useEffect(() => {
-    if (!message.previewUrl && message.attachmentType === "image" && message.attachmentPath) {
-      getAttachmentUrl(message.attachmentPath).then(setPreviewUrl).catch(() => { });
+    if (!attachment.previewUrl && attachment.type === "image" && attachment.path) {
+      getAttachmentUrl(attachment.path).then(setPreviewUrl).catch(() => { });
     }
-  }, [message.previewUrl, message.attachmentPath, message.attachmentType]);
+  }, [attachment.previewUrl, attachment.path, attachment.type]);
 
+  return <AttachmentPreview fileName={attachment.fileName} type={attachment.type} previewUrl={previewUrl} />;
+}
+
+function AttachedFiles({ message }) {
+  const attachments = message.attachments || [];
+  if (!attachments.length) return null;
   return (
-    <AttachmentPreview fileName={message.attachmentName} type={message.attachmentType} previewUrl={previewUrl} />
+    <div className="flex flex-wrap gap-2">
+      {attachments.map((a, i) => <AttachmentItem key={a.path || i} attachment={a} />)}
+    </div>
   );
 }
 
-export default function ChatMessage({ message, onStartSurvey }) {
+export default function ChatMessage({
+  message,
+  onConfirmDesign,
+  surveyBuilt,
+  onRegenerate,
+  regenerating,
+  onEdit,
+  editing,
+  busy, // true while ANY send/edit/regenerate is in flight — disables actions app-wide
+}) {
   const [copied, setCopied] = useState(false);
+  const [draft, setDraft] = useState(message.text);
+  const [confirming, setConfirming] = useState(false);
+  const textareaRef = useRef(null);
 
   function handleCopy() {
     navigator.clipboard?.writeText(message.text);
@@ -28,25 +50,125 @@ export default function ChatMessage({ message, onStartSurvey }) {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  useEffect(() => {
+    if (editing) {
+      setDraft(message.text);
+      // Let the textarea mount before focusing/sizing it.
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+      });
+    }
+  }, [editing, message.text]);
+
+  function autosize(e) {
+    e.target.style.height = "auto";
+    e.target.style.height = `${e.target.scrollHeight}px`;
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === "Escape") {
+      onEdit?.(null);
+    }
+  }
+
+  function saveEdit() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === message.text) {
+      onEdit?.(null); // no real change — just close the editor
+      return;
+    }
+    onEdit?.(message.id, trimmed);
+  }
+
   if (message.role === "user") {
     return (
-      <div className="flex flex-col items-end animate-fadeInUp">
+      <div className="flex flex-col items-end animate-fadeInUp group">
         {message.referencedSurveyTitle && (
           <div className="flex items-center gap-1.5 mb-1.5 bg-panel border border-line rounded-lg px-2 py-1 max-w-[80%]">
             <FileText size={11} className="text-ink/40 shrink-0" />
             <span className="text-[11px] text-ink/60 truncate">{message.referencedSurveyTitle}</span>
           </div>
         )}
-        {message.attachmentName && (
+        {message.attachments?.length > 0 && (
           <div className="mb-1.5">
-            <AttachedFile message={message} />
+            <AttachedFiles message={message} />
           </div>
         )}
-        <div className="bg-panel2 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm">{message.text}</div>
+
+        {editing ? (
+          <div className="w-full max-w-[80%] bg-panel2 rounded-2xl px-4 py-2.5">
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); autosize(e); }}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              className="w-full bg-transparent text-sm resize-none outline-none leading-relaxed"
+            />
+            <div className="flex items-center justify-end gap-2 mt-2">
+              <button
+                onClick={() => onEdit?.(null)}
+                className="focus-ring text-xs font-medium text-ink/50 hover:text-ink px-3 py-1.5 rounded-lg transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={busy}
+                className="focus-ring text-xs font-medium bg-btn text-btn-foreground rounded-lg px-3 py-1.5 hover:bg-btn/90 transition disabled:opacity-50"
+              >
+                Save & submit
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="bg-panel2 rounded-2xl px-4 py-2.5 max-w-[80%] text-sm">{message.text}</div>
+            <div className="flex items-center gap-3 mt-1.5 text-ink/35 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+              <button onClick={handleCopy} className="focus-ring hover:text-ink transition" title={copied ? "Copied" : "Copy"}>
+                {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              </button>
+              <button
+                onClick={() => onEdit?.(message.id)}
+                disabled={busy}
+                className="focus-ring hover:text-ink transition disabled:opacity-40"
+                title="Edit"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={() => onRegenerate?.(message.id)}
+                disabled={busy}
+                className="focus-ring hover:text-ink transition disabled:opacity-40"
+                title="Regenerate"
+              >
+                <RotateCw size={13} className={regenerating ? "animate-spin" : ""} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
+
+  async function handlePickDesign(templateId, draft) {
+    if (confirming) return;
+    setConfirming(true);
+    try {
+      await onConfirmDesign?.(message.id, templateId, draft);
+    } finally {
+      setConfirming(false);
+    }
+  }
 
   return (
     <div className="max-w-[85%] animate-fadeInUp">
@@ -54,6 +176,24 @@ export default function ChatMessage({ message, onStartSurvey }) {
         message.blocks.map((block, i) =>
           block.type === "chart" ? (
             <ChatChart key={i} chart={block.chart} />
+          ) : block.type === "templateSuggestion" ? (
+            <TemplateSuggestionCard
+              key={i}
+              questions={block.questions}
+              templateId={block.templateId}
+              reason={block.reason}
+              locked={block.locked}
+              building={confirming}
+              onSelect={(id) => handlePickDesign(id, block.draft)}
+            />
+          ) : block.type === "sheet" ? (
+            <SheetPreviewCard
+              key={i}
+              sheetId={block.sheetId}
+              title={block.title}
+              columns={block.columns}
+              rows={block.rows}
+            />
           ) : (
             <MarkdownText key={i} content={block.content} />
           )
@@ -62,14 +202,10 @@ export default function ChatMessage({ message, onStartSurvey }) {
         <MarkdownText content={message.text} />
       )}
 
-      {message.suggestSurvey && (
-        <button
-          onClick={() => onStartSurvey(message.id)}
-          className="focus-ring mt-3 inline-flex items-center gap-1.5 font-semibold text-sm hover:gap-2.5 transition-all"
-        >
-          Start Survey
-          <ArrowRight size={15} />
-        </button>
+      {message.suggestSurvey && surveyBuilt && (
+        <div className="mt-3 inline-block border border-line rounded-xl px-3.5 py-2">
+          <MarkdownText content="✅ **Survey created**" />
+        </div>
       )}
 
       <div className="flex items-center gap-3 mt-2.5 text-ink/35">
@@ -78,9 +214,14 @@ export default function ChatMessage({ message, onStartSurvey }) {
         </button>
         <button className="focus-ring hover:text-ink transition" title="Good response"><ThumbsUp size={14} /></button>
         <button className="focus-ring hover:text-ink transition" title="Bad response"><ThumbsDown size={14} /></button>
-        <button className="focus-ring hover:text-ink transition" title="Share"><Share2 size={14} /></button>
-        <button className="focus-ring hover:text-ink transition" title="Regenerate"><RotateCw size={14} /></button>
-        <button className="focus-ring hover:text-ink transition" title="More"><MoreHorizontal size={14} /></button>
+        <button
+          onClick={() => onRegenerate?.(message.id)}
+          disabled={regenerating}
+          className="focus-ring hover:text-ink transition disabled:opacity-40"
+          title="Regenerate"
+        >
+          <RotateCw size={14} className={regenerating ? "animate-spin" : ""} />
+        </button>
       </div>
     </div>
   );

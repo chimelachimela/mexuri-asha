@@ -1,0 +1,86 @@
+.optionList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tileGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.option {
+    text-align: left;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 12px 16px;
+    border-radius: 6px;
+    border: 1.5px solid rgb(var(--color-line));
+    background: rgb(var(--color-panel));
+    color: rgb(var(--color-ink));
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.option:hover {
+    border-color: rgb(var(--color-line-2));
+}
+
+.optionSelected {
+    border-color: rgb(var(--color-ink));
+    background: rgb(var(--color-panel-2));
+}
+
+.optionLabel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.check {
+    flex-shrink: 0;
+}
+
+.scaleRow {
+    display: flex;
+    gap: 8px;
+}
+
+.scaleOption {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 0;
+    border-radius: 6px;
+    border: 1.5px solid rgb(var(--color-line));
+    background: rgb(var(--color-panel));
+    color: rgb(var(--color-ink));
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.scaleOption:hover {
+    border-color: rgb(var(--color-line-2));
+}
+
+.textArea {
+    width: 100%;
+    resize: none;
+    font-size: 14px;
+    font-family: inherit;
+    padding: 12px 16px;
+    border-radius: 6px;
+    border: 1.5px solid rgb(var(--color-line));
+    background: rgb(var(--color-panel-2));
+    color: rgb(var(--color-ink));
+}
+
+.textArea::placeholder {
+    color: rgb(var(--color-ink) / 0.35);
+}
+
+.textArea:focus {
+    outline: none;
+    border-color: rgb(var(--color-ink));
+}

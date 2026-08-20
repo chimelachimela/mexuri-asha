@@ -1,6 +1,7 @@
 import { verifyUser } from "../_lib/verifyUser.js";
 import { callGroq } from "../_lib/groq.js";
 import { applyCors } from "../_lib/cors.js";
+import { BRAND_RULES } from "../_lib/brand.js";
 
 const VALID_TYPES = new Set(["single", "multi", "text", "scale"]);
 
@@ -18,12 +19,17 @@ Conversation context: ${chatContext}
 
 Each question is one of: "single" (single choice), "multi" (multiple choice), "text" (open-ended, no options), "scale" (1-5 rating, options must be ["1","2","3","4","5"]). Give 4-6 realistic, specific options for single/multi questions — not generic placeholders.
 
+STRICT ADHERENCE RULE: if the conversation explicitly names specific fields/questions to include, or a specific number of questions/steps/screens, you MUST follow that exactly — same fields, same count, same wording as closely as possible. Do not add extra questions, drop any, or substitute your own ideas in their place. Only use your own judgment to fill in anything the user left unspecified (e.g. answer options for a field they named but didn't detail).
+
+${BRAND_RULES}
+
 Respond with ONLY a JSON object of this shape:
 {"title": string, "description": string, "questions": [{"type": "single"|"multi"|"text"|"scale", "text": string, "options": string[]}, ...]}
 (omit "options" or use an empty array for "text" questions)`;
 
   try {
     const result = await callGroq({
+      task: "reasoning",
       prompt,
       systemInstruction: "You always respond with a single valid JSON object and nothing else — no markdown fences, no commentary outside the JSON.",
     });

@@ -1,7 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { X, FileText, ArrowRight, Loader2 } from "lucide-react";
+import { getTemplate } from "../lib/templates/registry";
+import { recommendTemplate } from "../lib/templates/compatibility";
 
+// Template is now chosen in chat (via the design-suggestion card) before
+// the survey is built, so this panel just reviews the finished survey —
+// no picker here anymore. Template can still be changed later from the
+// survey's own Templates tab.
 export default function SurveyBuildPanel({ survey, building, onClose }) {
   const navigate = useNavigate();
 
@@ -10,6 +16,8 @@ export default function SurveyBuildPanel({ survey, building, onClose }) {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = original; };
   }, []);
+
+  const activeTemplate = survey ? getTemplate(survey.templateId || recommendTemplate(survey.questions).id) : null;
 
   const content = (
     <div className="flex flex-col h-full min-h-0">
@@ -30,12 +38,18 @@ export default function SurveyBuildPanel({ survey, building, onClose }) {
         {building ? (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-16">
             <Loader2 size={22} className="animate-spin text-accent-soft" />
-            <p className="text-sm text-ink/50">Asha is building your survey…</p>
+            <p className="text-sm text-ink/50">Asha is designing your survey…</p>
           </div>
         ) : (
           <div className="animate-fadeInUp">
             <h3 className="text-xl font-bold mb-1.5">{survey.title}</h3>
-            <p className="text-sm text-ink/50 mb-6">{survey.description}</p>
+            <p className="text-sm text-ink/50 mb-5">{survey.description}</p>
+
+            {activeTemplate && (
+              <div className="text-xs text-ink/40 mb-5">
+                Template: <span className="text-ink/70 font-medium">{activeTemplate.name}</span>
+              </div>
+            )}
 
             <div className="space-y-4">
               {survey.questions.map((q, i) => (

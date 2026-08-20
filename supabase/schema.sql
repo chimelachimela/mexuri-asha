@@ -71,13 +71,21 @@ create policy "Users manage messages in their own chats"
     exists (select 1 from public.chats where chats.id = messages.chat_id and chats.user_id = auth.uid())
   );
 
--- ---------- document attachments (added for data-analysis feature) ----------
--- Generic enough to cover CSV/Excel now and PDF/Word/images later without
--- a second migration.
+-- ---------- message extras ----------
+-- referenced_survey_*: set when a user message references an existing
+--   survey from the picker (e.g. "improve this survey: ...").
+-- attachment_*: set when a user message has an uploaded document/image.
+-- blocks: assistant messages can carry structured content (charts,
+--   the in-chat template design-suggestion card) alongside plain text —
+--   jsonb array of { type, ...data }, rendered by ChatMessage.jsx.
 alter table public.messages
+  add column if not exists referenced_survey_id uuid,
+  add column if not exists referenced_survey_title text,
   add column if not exists attachment_name text,
   add column if not exists attachment_type text,   -- 'csv' | 'xlsx' | (later: 'pdf' | 'docx' | 'image')
-  add column if not exists attachment_summary text; -- compact text handed to the AI, same role as referenced_survey's responseSummary
+  add column if not exists attachment_summary text, -- compact text handed to the AI, same role as referenced_survey's responseSummary
+  add column if not exists attachment_path text,
+  add column if not exists blocks jsonb;
 
 create index if not exists messages_chat_id_idx on public.messages(chat_id);
 
@@ -90,8 +98,14 @@ create table if not exists public.surveys (
   description text,
   cover_color_seed int default 0,
   status text check (status in ('draft', 'published')) default 'draft',
+  template_id text default 'stack',
+  seen_at timestamptz,
   created_at timestamptz default now()
 );
+
+-- Migration for existing databases created before these columns existed:
+-- alter table public.surveys add column if not exists template_id text default 'stack';
+-- alter table public.surveys add column if not exists seen_at timestamptz;
 
 alter table public.surveys enable row level security;
 
@@ -152,3 +166,33 @@ create policy "Anyone can submit a response to a published survey"
   on public.responses for insert with check (
     exists (select 1 from public.surveys where surveys.id = responses.survey_id and surveys.status = 'published')
   );
+
+  -- ---------- Asha Sheets ----------
+-- rows/columns are the live, editable dataset — copied in at creation time
+-- rather than re-read from the source file on every load, so manual edits
+-- on the full Sheets page just update this row directly.
+create table if not exists public.sheets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  chat_id uuid references public.chats(id) on delete set null,
+  title text not null,
+  columns jsonb not null,
+  rows jsonb not null,
+  source_file_name text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.sheets enable row level security;
+
+create policy "Owners manage their own sheets"
+  on public.sheets for all using (auth.uid() = user_id);
+
+create index if not exists sheets_user_id_idx on public.sheets(user_id);
+-- Multi-file attachments: an array of every file attached to a message,
+-- replacing the old single attachment_* columns for new messages. Old rows
+-- keep working — dbService.js falls back to the singular columns when this
+-- is null.
+alter table public.messages
+  add column if not exists attachments jsonb;
+-- shape: [{ "fileName": string, "type": string, "summary": string|null, "path": string }, ...]
