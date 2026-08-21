@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { SquarePen, FileText, BarChart3, Settings, User, LogOut, PanelLeft, Trash2, Menu, X, MessageSquare, Table2 } from "lucide-react";
+import { SquarePen, FileText, BarChart3, Settings, User, LogOut, PanelLeft, Trash2, Menu, X, MessageSquare } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import ConfirmModal from "./ConfirmModal";
 
 const NAV_ITEMS = [
   { id: "new", label: "New Chat", icon: SquarePen, action: "newChat" },
   { id: "surveys", label: "Surveys", icon: FileText, path: "/surveys" },
-  { id: "sheets", label: "Asha Sheets", icon: Table2, path: "/sheets" },
   { id: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics" },
   { id: "settings", label: "Settings", icon: Settings, path: "/settings" },
 ];
@@ -88,8 +87,11 @@ export default function Sidebar({ activeChat, onSelectChat, onNewChat, onDeleteC
               key={item.id}
               onClick={() => handleNav(item)}
               title={collapsed ? item.label : undefined}
-              className={`focus-ring flex items-center gap-3 rounded-lg transition text-sm ${collapsed ? "w-10 h-10 justify-center" : "w-full px-3 py-2.5"
-                } ${isActive ? "bg-panel2 text-ink" : "text-ink/60 hover:text-ink hover:bg-panel"}`}
+              className={`focus-ring flex items-center gap-3 rounded-full transition text-sm ${collapsed ? "w-10 h-10 justify-center" : "w-full px-4 py-2.5"
+                } ${isActive
+                  ? "bg-accent/15 text-accent-soft font-medium"
+                  : "text-ink/60 hover:text-ink hover:bg-panel2"
+                }`}
             >
               <span className="relative">
                 <item.icon size={18} strokeWidth={1.8} />
@@ -112,7 +114,7 @@ export default function Sidebar({ activeChat, onSelectChat, onNewChat, onDeleteC
               <div key={c.id} className="group relative">
                 <button
                   onClick={() => handleSelectChat(c.id)}
-                  className={`focus-ring block w-full text-left truncate text-sm pl-2.5 pr-8 py-2 rounded-lg transition ${activeChat === c.id ? "bg-panel2 text-ink" : "text-ink/55 hover:text-ink hover:bg-panel"
+                  className={`focus-ring block w-full text-left truncate text-sm pl-2.5 pr-8 py-2 rounded-lg transition ${activeChat === c.id ? "bg-accent/15 text-accent-soft" : "text-ink/55 hover:text-ink hover:bg-accent/[0.06]"
                     }`}
                 >
                   {c.title || "New chat"}

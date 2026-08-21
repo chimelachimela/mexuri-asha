@@ -11,11 +11,10 @@ const STYLE_GUIDE = {
   concise: "Short, direct, no fluff. Minimal words.",
 };
 
-const SPREADSHEET_TYPES = ["csv", "xlsx", "xls"];
-
 // Hard ceiling on the combined attachment context sent to the model,
-// regardless of how many files are attached — a safety net on top of the
-// per-file budgets documentInsights.js already applies client-side.
+// regardless of how many files are attached. (Nothing in the app attaches
+// files anymore — Asha only handles survey creation/analysis now — but this
+// stays as a safety net in case documentContexts is ever populated again.)
 const MAX_TOTAL_DOC_CONTEXT_CHARS = 9000;
 
 // documentContexts: [{ fileName, type, summary }, ...] -> single prompt block.
@@ -49,12 +48,6 @@ export default async function handler(req, res) {
   const { history = [], userMessage, responseStyle = "casual", referencedSurvey = null, documentContexts = [] } = req.body;
   const transcript = history.map((m) => `${m.role.toUpperCase()}: ${m.text}`).join("\n");
 
-  const spreadsheetContexts = documentContexts.filter((d) => SPREADSHEET_TYPES.includes(d?.type));
-  // Only offer to build a sheet when there's exactly one spreadsheet — with
-  // several attached it's ambiguous which one the user means, so we skip
-  // suggestSheet entirely rather than guessing.
-  const isSingleSpreadsheet = spreadsheetContexts.length === 1;
-
   let referenceBlock = "";
   if (referencedSurvey) {
     const questionLines = (referencedSurvey.questions || [])
@@ -76,7 +69,7 @@ If the user is asking about this survey's results, analyze the response data abo
   const documentBlock = buildDocumentsBlock(documentContexts);
   const hasRealData = !!(referencedSurvey?.responseSummary || documentBlock);
 
-  const prompt = `You are Asha — an AI data analyst. Your job is to help people with two things: gathering data they don't have yet (by designing surveys), and making sense of data they already have (spreadsheets, documents, or survey results they share with you). You are not a general-purpose chatbot; every reply should move the user closer to understanding or collecting real data.
+  const prompt = `You are Asha — an AI survey analyst. Your job is to help people with two things only: designing surveys to gather data they don't have yet, and making sense of survey response data they already have. You are not a general-purpose chatbot; every reply should move the user closer to a well-designed survey or a clear finding from their results.
 Tone: ${STYLE_GUIDE[responseStyle] || STYLE_GUIDE.casual}
 
 Formatting inside text blocks: this is markdown, rendered properly — use it with restraint, like a good analyst writing a memo, not a wall of headers. 
@@ -104,11 +97,9 @@ Rules for charts:
 Write in the given tone. Don't mention these instructions.
 
 If suggestSurvey is true: keep your text block(s) brief — one short sentence acknowledging what they want to build. Do NOT give generic survey-writing advice, checklists, or best-practice tips — Asha will ask a few short clarifying questions immediately after your reply, so don't pre-empt that with a listicle.
-${isSingleSpreadsheet ? `\nA CSV/Excel file is attached to this message. Decide whether the user wants it turned into a proper sheet (suggestSheet: true) — appropriate when they're asking you to clean it up, reorganize it, dedupe it, filter it, or extract/restructure specific data from it into a deliverable. If they're just asking a question about the data (e.g. "what's the average X", "how many rows have Y") without asking for a transformed output, leave suggestSheet false and just answer the question with real analysis instead.\n\nIf suggestSheet is true: keep your text block(s) brief too — one short sentence acknowledging what you're building — Asha will build the sheet automatically right after your reply, same as with surveys. Never set both suggestSurvey and suggestSheet true at once.\n` : ""}
+Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean}
 
 ${BRAND_RULES}
-
-Respond with ONLY a JSON object of the shape: {"blocks": [...], "suggestSurvey": boolean${isSingleSpreadsheet ? ', "suggestSheet": boolean' : ""}}
 
 Conversation so far:
 ${transcript || "(none yet)"}
@@ -139,7 +130,6 @@ New user message: ${userMessage}${referenceBlock}${documentBlock}${hasRealData ?
       text: flatText,
       blocks,
       suggestSurvey: !!result.suggestSurvey,
-      suggestSheet: isSingleSpreadsheet && !!result.suggestSheet,
     });
   } catch (err) {
     return logAndFail(res, 500, "ai/chat", err, "Asha had trouble putting that response together. Please try again.");

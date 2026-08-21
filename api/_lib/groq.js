@@ -1,5 +1,7 @@
-// Each provider is OpenAI-compatible, so the same fetch/parsing logic works
-// for all of them — only the URL, key, and model IDs differ.
+// Single-provider setup — Groq only, GPT-OSS models for every task. Asha's
+// scope is survey creation + response analysis now (no vision, no sheets),
+// so there's no need for the multi-provider fallback chain that used to
+// exist here for the general-chat/vision/sheets workload.
 const PROVIDERS = {
   groq: {
     url: "https://api.groq.com/openai/v1/chat/completions",
@@ -8,37 +10,17 @@ const PROVIDERS = {
     // counts prompt + reserved completion tokens together — stay under it.
     defaultTokenBudget: 7800,
   },
-  deepseek: {
-    url: "https://platform.deepseek.com/chat/completions",
-    apiKeyEnv: "DEEPSEEK_API_KEY",
-    // 1M-token context on DeepSeek's side — this is just a sane ceiling on
-    // what we send, not a hard platform limit like Groq's.
-    defaultTokenBudget: 100000,
-  },
-  moonshot: {
-    url: "https://api.moonshot.ai/v1/chat/completions",
-    apiKeyEnv: "MOONSHOT_API_KEY",
-    defaultTokenBudget: 100000,
-  },
 };
 
-// task -> which provider/model handles it. Only "reasoning" (chat replies,
-// survey/sheet/planning generation — the highest-volume calls) moved off
-// Groq; "vision" and "light" stay put since they're low-volume and Groq's
-// cap was never the bottleneck there.
+// task -> which model handles it. Both tasks stay on Groq/GPT-OSS now;
+// "reasoning" gets the bigger model as primary since it covers survey
+// generation and response-analysis replies, "light" (titles, small
+// planning questions) keeps the smaller model primary for speed/cost.
 const TASK_CONFIG = {
-  vision: {
-    provider: "groq",
-    primary: "qwen/qwen3.6-27b",
-    fallback: "qwen/qwen3.6-27b",
-  },
   reasoning: {
-    provider: "deepseek",
-    primary: "deepseek-v4-flash",
-    fallback: "deepseek-v4-flash",
-    // If DeepSeek itself is down/erroring, fall back across providers to
-    // Groq rather than failing the request outright.
-    crossFallback: { provider: "groq", model: "openai/gpt-oss-120b" },
+    provider: "groq",
+    primary: "openai/gpt-oss-120b",
+    fallback: "openai/gpt-oss-20b",
   },
   light: {
     provider: "groq",
@@ -112,21 +94,13 @@ export async function callGroq({
   let usedProvider = taskConfig.provider;
 
   // Retry on rate limit (429), request-too-large (413), or server errors (5xx)
-  const shouldRetrySamePvdr =
+  const shouldRetry =
     (res.status === 429 || res.status === 413 || res.status >= 500) &&
     taskConfig.fallback !== taskConfig.primary;
 
-  if (shouldRetrySamePvdr) {
+  if (shouldRetry) {
     console.error(`[llm] ${taskConfig.provider}/${taskConfig.primary} failed (${res.status}), retrying on ${taskConfig.fallback}`);
     res = await attempt(taskConfig.provider, taskConfig.fallback);
-  }
-
-  // Still failing after the same-provider retry — hop to a different
-  // provider entirely if one's configured for this task.
-  if (!res.ok && taskConfig.crossFallback) {
-    console.error(`[llm] ${taskConfig.provider} failed (${res.status}), falling back to ${taskConfig.crossFallback.provider}`);
-    res = await attempt(taskConfig.crossFallback.provider, taskConfig.crossFallback.model);
-    usedProvider = taskConfig.crossFallback.provider;
   }
 
   if (!res.ok) {

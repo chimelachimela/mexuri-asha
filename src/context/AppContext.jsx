@@ -10,17 +10,6 @@ export function AppProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem("asha_theme") || "dark");
   const [chats, setChats] = useState([]);
   const [surveys, setSurveys] = useState([]);
-  const [sheets, setSheets] = useState([]);
-
-  const refreshSheets = useCallback(async () => {
-    if (!session?.id) return;
-    setSheets(await db.listSheets(session.id));
-  }, [session?.id]);
-
-  useEffect(() => {
-    if (session?.id) refreshSheets();
-    else setSheets([]);
-  }, [session?.id, refreshSheets]);
 
   useEffect(() => {
     let mounted = true;
@@ -100,18 +89,6 @@ export function AppProvider({ children }) {
 
   const unseenSurveyCount = surveys.filter((s) => !s.seenAt).length;
 
-  const addSheetToList = useCallback((sheet) => {
-    setSheets((prev) => [sheet, ...prev]);
-  }, []);
-
-  const updateSheetInList = useCallback((sheetId, patch) => {
-    setSheets((prev) => prev.map((s) => (s.id === sheetId ? { ...s, ...patch } : s)));
-  }, []);
-
-  const removeSheetFromList = useCallback((sheetId) => {
-    setSheets((prev) => prev.filter((s) => s.id !== sheetId));
-  }, []);
-
   const signInWithGoogle = useCallback(() => authService.signInWithGoogle(), []);
 
   const completeOnboarding = useCallback(async (patch) => {
@@ -172,11 +149,6 @@ export function AppProvider({ children }) {
         addSurveyToList,
         markSurveySeen,
         unseenSurveyCount,
-        sheets,
-        refreshSheets,
-        addSheetToList,
-        updateSheetInList,
-        removeSheetFromList,
       }}
     >
       {children}

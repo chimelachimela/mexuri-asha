@@ -1,0 +1,197 @@
+/* ChatHome.module.css
+   Plain CSS (CSS Modules, auto-scoped) for the "What's on your mind?" home
+   screen and the pill composer bar. Written directly against the theme
+   tokens in src/index.css (--color-canvas, --color-panel, etc.) instead of
+   Tailwind utility classes.
+*/
+
+/* ---------- home screen wrapper ---------- */
+
+/* Fills the space next to the sidebar. On mobile this is the whole screen
+   (sidebar collapses to an overlay), so the sparkle + greeting sit in the
+   upper-middle third and the composer is pinned to the bottom edge —
+   matching the reference screenshot. On desktop everything just centers
+   together, composer included, since there's no on-screen keyboard to plan
+   around. */
+.homeScreen {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden;
+  /* soft blue-violet vignette rising from the bottom edge, same family as
+     the composer glow — an ambient echo rather than a repeat of it */
+  background: radial-gradient(ellipse at 50% 100%, rgba(76, 141, 246, 0.16) 0%, rgba(19, 19, 24, 0) 55%);
+}
+
+.homeContent {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 24px;
+}
+
+/* ---------- sparkle mark ---------- */
+
+.sparkleWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  animation: sparklePulse 3.2s ease-in-out infinite;
+}
+
+@keyframes sparklePulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.08);
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sparkleWrap {
+    animation: none;
+  }
+}
+
+/* ---------- greeting ---------- */
+
+.greeting {
+  margin: 0;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  color: rgb(var(--color-ink));
+  max-width: 22ch;
+}
+
+@media (min-width: 640px) {
+  .greeting {
+    font-size: 28px;
+  }
+}
+
+/* ---------- composer pill ---------- */
+
+/* Shared by both the centered (home screen) and docked (mid-conversation)
+   composer — fully rounded on every breakpoint per the reference design,
+   not just on mobile. */
+.composerPill {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 10px 20px;
+  border-radius: 9999px;
+  background: rgb(var(--color-panel));
+  border: 1px solid rgb(var(--color-line));
+  box-shadow: var(--shadow-1);
+  transition: box-shadow 0.2s var(--ease-standard), border-color 0.2s var(--ease-standard);
+}
+
+/* Multi-line state: once the textarea wraps past one line, the pill can no
+   longer be a true stadium shape (the corners would clip descenders), so it
+   relaxes to a large rounded rect instead. Toggled from JS via the
+   data-expanded attribute rather than a height media query. */
+.composerPill[data-expanded="true"] {
+  border-radius: 28px;
+  padding: 16px 16px 12px 20px;
+}
+
+.composerPill:focus-within {
+  border-color: rgb(var(--color-line-2));
+  box-shadow: var(--shadow-2);
+}
+
+.composerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.composerTextarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font: inherit;
+  font-size: 15px;
+  color: rgb(var(--color-ink));
+  padding: 8px 0;
+  max-height: 500px;
+}
+
+.composerTextarea::placeholder {
+  color: rgb(var(--color-ink) / 0.35);
+}
+
+/* circular icon buttons either side of the textarea (+, mic/send) */
+.iconButton {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: rgb(var(--color-ink) / 0.55);
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease-standard), color 0.15s var(--ease-standard);
+}
+
+.iconButton:hover {
+  background: rgb(var(--color-panel-2));
+  color: rgb(var(--color-ink));
+}
+
+.iconButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.iconButton:disabled:hover {
+  background: transparent;
+}
+
+/* the send/stop button stays filled so it reads as the primary action,
+   same gradient family as the rest of the accent system */
+.sendButton {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #4C8DF6, #9168F0, #F45FA0);
+  color: white;
+  transition: opacity 0.15s var(--ease-standard), transform 0.1s var(--ease-standard);
+}
+
+.sendButton:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.sendButton:active:not(:disabled) {
+  transform: scale(0.94);
+}

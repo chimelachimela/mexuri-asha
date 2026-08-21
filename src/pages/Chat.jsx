@@ -9,11 +9,28 @@ import PaymentModal from "../components/PaymentModal";
 import SurveyPickerModal from "../components/SurveyPickerModal";
 import * as db from "../lib/services/dbService";
 import * as ai from "../lib/services/aiService";
-import { parseSpreadsheetFile, summarizeSpreadsheet } from "../lib/documentInsights";
 import { recommendTemplate } from "../lib/templates/compatibility";
-import { uploadAttachment, getAttachmentUrl } from "../lib/services/storageService";
-import AttachmentPreview from "../components/AttachmentPreview";
-import { applySheetTransform } from "../lib/sheetTransform";
+import styles from "./ChatHome.module.css";
+
+// ---------- sparkle mark (Gemini-style four-point accent, own gradient) ----------
+function SparkleIcon({ size = 32, className = "" }) {
+  const gradId = "asha-sparkle-gradient";
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <defs>
+        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#4C8DF6" />
+          <stop offset="55%" stopColor="#9168F0" />
+          <stop offset="100%" stopColor="#F45FA0" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M12 2c.6 3.6 1.4 6 3 7.6 1.6 1.6 4 2.4 7 3-3 .6-5.4 1.4-7 3-1.6 1.6-2.4 4-3 7.6-.6-3.6-1.4-6-3-7.6-1.6-1.6-4-2.4-7-3 3-.6 5.4-1.4 7-3 1.6-1.6 2.4-4 3-7.6z"
+        fill={`url(#${gradId})`}
+      />
+    </svg>
+  );
+}
 
 // ---------- inline SVG icons (replaces lucide-react) ----------
 function IconPlus({ size = 17, className = "" }) {
@@ -37,16 +54,6 @@ function IconStop({ size = 13, className = "" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
       <rect x="5" y="5" width="14" height="14" rx="2" />
-    </svg>
-  );
-}
-
-function IconImage({ size = 14, className = "" }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="9" cy="9" r="2" />
-      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
     </svg>
   );
 }
@@ -111,8 +118,6 @@ const IDLE_PROMPTS = [
   "Create a quick employee engagement survey",
   "Ask my users what feature they want next",
 ];
-
-const MAX_ATTACHMENTS = 5;
 
 function useIdlePlaceholder(active) {
   const [text, setText] = useState("Ask Asha…");
@@ -223,7 +228,7 @@ function useIsMobile() {
 // ---------- end mobile keyboard awareness ----------
 
 export default function Chat() {
-  const { session, addChatToList, upsertChatMeta, removeChatFromList, addSurveyToList, addSheetToList } = useApp();
+  const { session, addChatToList, upsertChatMeta, removeChatFromList, addSurveyToList } = useApp();
   const { chatId } = useParams();
   const navigate = useNavigate();
 
@@ -242,9 +247,6 @@ export default function Chat() {
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [surveyModalOpen, setSurveyModalOpen] = useState(false);
   const [referencedSurvey, setReferencedSurvey] = useState(null);
-  const [attachedDocuments, setAttachedDocuments] = useState([]); // [{ localId, fileName, type, summary, storagePath, previewUrl, fullData?, pendingAnalysis? }]
-  const [attaching, setAttaching] = useState(false);
-  const [attachingStage, setAttachingStage] = useState(""); // "uploading" | "analyzing"
 
   const [planningQuestions, setPlanningQuestions] = useState(null); // array | null
   const [planningIndex, setPlanningIndex] = useState(0);
@@ -332,68 +334,6 @@ export default function Chat() {
     setReferencedSurvey(null);
   }
 
-  function withSpreadsheetSummaries(docs) {
-    const idx = docs.map((d, i) => (d.rawSpreadsheet ? i : -1)).filter((i) => i >= 0);
-    if (!idx.length) return docs;
-    const summaries = idx.map((i) => summarizeSpreadsheet(docs[i].rawSpreadsheet));
-    const next = [...docs];
-    idx.forEach((i, k) => { next[i] = { ...next[i], summary: summaries[k], fullData: docs[i].rawSpreadsheet }; });
-    return next;
-  }
-
-  function clearAttachment(localId) {
-    setAttachedDocuments((prev) => {
-      const doc = prev.find((d) => d.localId === localId);
-      if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
-      return withSpreadsheetSummaries(prev.filter((d) => d.localId !== localId));
-    });
-  }
-
-  async function handleAttachFiles(fileList) {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-
-    const room = MAX_ATTACHMENTS - attachedDocuments.length;
-    if (room <= 0) {
-      setErrorMsg(`You can attach up to ${MAX_ATTACHMENTS} files per message.`);
-      return;
-    }
-    const toAttach = files.slice(0, room);
-    setErrorMsg(files.length > toAttach.length ? `Only added ${toAttach.length} of ${files.length} files — ${MAX_ATTACHMENTS} per message max.` : "");
-    setAttaching(true);
-
-    for (const file of toAttach) {
-      const isImage = file.type.startsWith("image/");
-      const previewUrl = isImage ? URL.createObjectURL(file) : null;
-      const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-      try {
-        const storagePath = await uploadAttachment(file, session.id);
-
-        if (isImage) {
-          // Analysis is deferred to send time and batched across every
-          // attached image in one call — see handleSend. This is where the
-          // token saving actually happens, so we don't spend it here.
-          setAttachedDocuments((prev) => [
-            ...prev,
-            { localId, fileName: file.name, type: "image", summary: null, storagePath, previewUrl, pendingAnalysis: true },
-          ]);
-        } else {
-          const { columns, rows } = await parseSpreadsheetFile(file);
-          setAttachedDocuments((prev) => withSpreadsheetSummaries([
-            ...prev,
-            { localId, fileName: file.name, type: file.name.split(".").pop().toLowerCase(), storagePath, previewUrl: null, rawSpreadsheet: { columns, rows } },
-          ]));
-        }
-      } catch (err) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setErrorMsg(err.message || `Couldn't attach "${file.name}".`);
-      }
-    }
-
-    setAttaching(false);
-  }
-
   function stopSending() {
     abortRef.current?.abort();
   }
@@ -404,25 +344,6 @@ export default function Chat() {
     setInput("");
     setErrorMsg("");
     setSending(true);
-    // Analyze every pending image together, in one call, before sending —
-    // this is the "all uploads at the same time" step.
-    let docs = attachedDocuments;
-    const pendingImages = docs.filter((d) => d.pendingAnalysis);
-    if (pendingImages.length) {
-      setThinkingLabel("Analyzing");
-      try {
-        const signedUrls = await Promise.all(pendingImages.map((d) => getAttachmentUrl(d.storagePath)));
-        const summaries = await ai.analyzeImages(signedUrls);
-        docs = docs.map((d) => {
-          const i = pendingImages.findIndex((p) => p.localId === d.localId);
-          return i === -1 ? d : { ...d, summary: summaries[i] || null, pendingAnalysis: false };
-        });
-      } catch (err) {
-        console.error("Image analysis failed:", err);
-        setErrorMsg("Attached image(s) couldn't be analyzed — Asha will reply without reading them.");
-        docs = docs.map((d) => (d.pendingAnalysis ? { ...d, pendingAnalysis: false } : d));
-      }
-    }
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -440,25 +361,18 @@ export default function Chat() {
         text,
         referencedSurveyId: referencedSurvey?.id,
         referencedSurveyTitle: referencedSurvey?.title,
-        attachments: docs.map((d) => ({ fileName: d.fileName, type: d.type, summary: d.summary, path: d.storagePath })),
       });
-      const previewByPath = new Map(docs.filter((d) => d.type === "image").map((d) => [d.storagePath, d.previewUrl]));
-      chat = {
-        ...chat,
-        messages: [...chat.messages, { ...userMsg, attachments: userMsg.attachments?.map((a) => ({ ...a, previewUrl: previewByPath.get(a.path) })) }],
-      };
+      chat = { ...chat, messages: [...chat.messages, userMsg] };
       setActiveChat(chat);
-      const sentDocuments = docs;
-      setAttachedDocuments([]);
 
-      setThinkingLabel(sentDocuments.length || referencedSurvey ? "Analyzing" : "Thinking");
+      setThinkingLabel(referencedSurvey ? "Analyzing" : "Thinking");
       const titlePromise = !chat.titleLocked ? ai.generateChatTitle(text) : Promise.resolve(null);
       const replyPromise = ai.sendMessage({
         history: chat.messages,
         userMessage: text,
         responseStyle: session.responseStyle,
         referencedSurvey: referencedSurvey || null,
-        documentContexts: sentDocuments.filter((d) => d.summary).map((d) => ({ fileName: d.fileName, type: d.type, summary: d.summary })),
+        documentContexts: [],
         signal: controller.signal,
       });
 
@@ -487,47 +401,6 @@ export default function Chat() {
       // survey before building it, not after an extra step.
       if (reply.suggestSurvey && !chat.surveyDraftId) {
         handleStartSurvey(chat.messages);
-      } else if (reply.suggestSheet) {
-        // Same "no extra click" philosophy as surveys — build the sheet
-        // right after the acknowledgment reply. The AI only decided WHICH
-        // operations to run (see generate-sheet.js); applying them to the
-        // full dataset happens here, in plain JS, so this stays fast no
-        // matter how many rows the source file actually has.
-        // With multiple attachments possible, use the first spreadsheet
-        // doc in this send as the source for the sheet.
-        const sentDocument = sentDocuments.find((d) => d.fullData);
-        if (sentDocument) {
-          setThinkingLabel("Organizing");
-          try {
-            const { title: sheetTitle, operations } = await ai.generateSheet({
-              fileName: sentDocument.fileName,
-              summary: sentDocument.summary,
-              instruction: text,
-            });
-            const { columns, rows } = applySheetTransform(sentDocument.fullData, operations);
-            const sheet = await db.createSheet(session.id, {
-              title: sheetTitle,
-              columns,
-              rows,
-              sourceFileName: sentDocument.fileName,
-              chatId: chat.id,
-            });
-            addSheetToList(sheet);
-
-            const sheetMsg = await db.appendMessage(chat.id, {
-              role: "assistant",
-              text: `Here's your sheet: "${sheet.title}".`,
-              blocks: [
-                { type: "text", content: `Here's your sheet: **${sheet.title}**.` },
-                { type: "sheet", sheetId: sheet.id, title: sheet.title, columns: sheet.columns, rows: sheet.rows },
-              ],
-            });
-            setActiveChat((c) => ({ ...c, messages: [...c.messages, sheetMsg] }));
-          } catch (err) {
-            console.error(err);
-            setErrorMsg(err.message || "Couldn't build that sheet. Please try again.");
-          }
-        }
       }
     } catch (err) {
       if (err.name === "AbortError") {
@@ -792,7 +665,7 @@ export default function Chat() {
         <div className="flex-1 min-w-0 flex flex-col relative">
           {/* header */}
           <div className="flex items-center justify-between px-6 py-4 shrink-0">
-            <UpgradePill onClick={() => setShowPaymentModal(true)} />
+            {/* <UpgradePill onClick={() => setShowPaymentModal(true)} /> */}
             <button
               onClick={handleNewChat}
               title="New chat"
@@ -815,33 +688,30 @@ export default function Chat() {
 
           {/* messages / empty state */}
           {!activeChat || activeChat.messages.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center px-6">
-              <h1 className="text-xl sm:text-3xl font-bold text-center mb-8 max-w-md">
-                {session?.name ? `${session.name}, ` : ""}what's on your mind?
-              </h1>
-              <div className="w-full max-w-xl">
-                <Composer
-                  input={input}
-                  setInput={setInput}
-                  onSend={handleSend}
-                  onStop={stopSending}
-                  sending={sending}
-                  centered
-                  mySurveys={mySurveys}
-                  referencedSurvey={referencedSurvey}
-                  onPickReference={pickReference}
-                  onClearReference={clearReference}
-                  plusMenuOpen={plusMenuOpen}
-                  onTogglePlusMenu={togglePlusMenu}
-                  surveyModalOpen={surveyModalOpen}
-                  onOpenSurveyModal={openSurveyModal}
-                  onCloseSurveyModal={() => setSurveyModalOpen(false)}
-                  attachedDocuments={attachedDocuments}
-                  onAttachFiles={handleAttachFiles}
-                  onClearAttachment={clearAttachment}
-                  attaching={attaching}
-                  attachingStage={attachingStage}
-                />
+            <div className={styles.homeScreen}>
+              <div className={styles.homeContent}>
+                <h1 className={styles.greeting}>
+                  {session?.name ? `What's the vibe, ${session.name}?` : "What's the vibe?"}
+                </h1>
+                <div style={{ width: "100%", maxWidth: 640 }}>
+                  <Composer
+                    input={input}
+                    setInput={setInput}
+                    onSend={handleSend}
+                    onStop={stopSending}
+                    sending={sending}
+                    centered
+                    mySurveys={mySurveys}
+                    referencedSurvey={referencedSurvey}
+                    onPickReference={pickReference}
+                    onClearReference={clearReference}
+                    plusMenuOpen={plusMenuOpen}
+                    onTogglePlusMenu={togglePlusMenu}
+                    surveyModalOpen={surveyModalOpen}
+                    onOpenSurveyModal={openSurveyModal}
+                    onCloseSurveyModal={() => setSurveyModalOpen(false)}
+                  />
+                </div>
               </div>
             </div>
           ) : (
@@ -922,11 +792,6 @@ export default function Chat() {
                       surveyModalOpen={surveyModalOpen}
                       onOpenSurveyModal={openSurveyModal}
                       onCloseSurveyModal={() => setSurveyModalOpen(false)}
-                      attachedDocuments={attachedDocuments}
-                      onAttachFiles={handleAttachFiles}
-                      onClearAttachment={clearAttachment}
-                      attaching={attaching}
-                      attachingStage={attachingStage}
                     />
                   )}
                 </div>
@@ -953,12 +818,13 @@ function Composer({
   input, setInput, onSend, onStop, sending, centered, mySurveys, referencedSurvey,
   onPickReference, onClearReference,
   plusMenuOpen, onTogglePlusMenu, surveyModalOpen, onOpenSurveyModal, onCloseSurveyModal,
-  attachedDocuments, onAttachFiles, onClearAttachment, attaching, attachingStage,
 }) {
   const textareaRef = useRef(null);
-  const docInputRef = useRef(null);
-  const imageInputRef = useRef(null);
   const idlePlaceholder = useIdlePlaceholder(!input && !sending);
+  // Tracks whether the textarea has grown past one line — the pill relaxes
+  // from a true stadium shape to a large rounded rect once that happens
+  // (see .composerPill[data-expanded] in ChatHome.module.css).
+  const [expanded, setExpanded] = useState(false);
 
   // Refocus once a send finishes — covers both "clicked the send button"
   // (which naturally steals focus) and the very first message, where the
@@ -976,110 +842,53 @@ function Composer({
     const next = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+    setExpanded(next > 44);
   }, [input]);
 
   return (
-    <div className={`bg-panel border border-line rounded-2xl p-3 ${centered ? "composer-glow" : ""}`}>
+    <div
+      className={styles.composerPill}
+      data-expanded={expanded}
+      style={centered ? { boxShadow: "none" } : undefined}
+    >
       {referencedSurvey && (
-        <div className="flex items-center gap-2 mb-2 bg-panel2 border border-line rounded-lg px-2.5 py-1.5 w-fit">
-          <IconFileText size={12} className="text-ink/40 shrink-0" />
-          <span className="text-xs text-ink/70 truncate max-w-[180px]">{referencedSurvey.title}</span>
-          <button onClick={onClearReference} className="focus-ring text-ink/30 hover:text-ink shrink-0">
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, width: "fit-content",
+          background: "rgb(var(--color-panel-2))", border: "1px solid rgb(var(--color-line))",
+          borderRadius: 999, padding: "6px 10px", fontSize: 12, color: "rgb(var(--color-ink) / 0.7)",
+        }}>
+          <IconFileText size={12} />
+          <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {referencedSurvey.title}
+          </span>
+          <button onClick={onClearReference} className="focus-ring" style={{ color: "rgb(var(--color-ink) / 0.4)", display: "flex" }}>
             <IconX size={11} />
           </button>
         </div>
       )}
-      {attachedDocuments.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          {attachedDocuments.map((doc) => (
-            <div key={doc.localId} className="flex items-center gap-1.5">
-              <AttachmentPreview
-                fileName={doc.fileName}
-                type={doc.type}
-                previewUrl={doc.previewUrl}
-                onClear={() => onClearAttachment(doc.localId)}
-              />
-              {doc.pendingAnalysis && attaching && attachingStage === "analyzing" && (
-                <span className="text-xs text-ink/50 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-ink/40 animate-pulse" />
-                  Reading image…
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {attaching && attachingStage === "uploading" && (
-        <div className="flex items-center gap-2 mb-2 bg-panel2 border border-line rounded-lg px-2.5 py-1.5 w-fit">
-          <span className="text-xs text-ink/50">Uploading…</span>
-        </div>
-      )}
-      <textarea
-        ref={textareaRef}
-        autoFocus
-        rows={1}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
-          }
-        }}
-        placeholder={idlePlaceholder}
-        className="w-full bg-transparent resize-none text-sm placeholder:text-ink/30 px-1 py-1 outline-none focus:ring-0"
-        style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
-      />
-      <div className="flex items-center justify-between mt-2 relative">
-        <div className="relative">
+      <div className={styles.composerRow}>
+        <div style={{ position: "relative" }}>
           <button
             onClick={onTogglePlusMenu}
             title="Add"
-            className="focus-ring w-8 h-8 rounded-lg flex items-center justify-center text-ink/50 hover:text-ink hover:bg-panel2 transition"
+            className={`focus-ring ${styles.iconButton}`}
           >
             <IconPlus size={17} />
           </button>
 
-          <input
-            ref={docInputRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              onAttachFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              onAttachFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-
           {plusMenuOpen && (
-            <div className="absolute bottom-11 left-0 w-48 bg-panel border border-line rounded-xl shadow-modal py-1 z-10">
-              <button
-                onClick={() => { onTogglePlusMenu(); docInputRef.current?.click(); }}
-                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
-              >
-                <IconFileText size={14} /> Add documents
-              </button>
-              <button
-                onClick={() => { onTogglePlusMenu(); imageInputRef.current?.click(); }}
-                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
-              >
-                <IconImage size={14} /> Add pictures
-              </button>
+            <div style={{
+              position: "absolute", bottom: 46, left: 0, width: 192,
+              background: "rgb(var(--color-panel))", border: "1px solid rgb(var(--color-line))",
+              borderRadius: 16, boxShadow: "var(--shadow-2)", padding: "4px 0", zIndex: 10,
+            }}>
               <button
                 onClick={onOpenSurveyModal}
-                className="focus-ring w-full flex items-center gap-2 text-left px-3 py-2 text-xs text-ink/70 hover:bg-panel2 hover:text-ink transition"
+                className="focus-ring"
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                  padding: "8px 12px", fontSize: 12, color: "rgb(var(--color-ink) / 0.7)", background: "none", border: "none", cursor: "pointer",
+                }}
               >
                 <IconClipboard size={14} /> Add survey
               </button>
@@ -1087,10 +896,27 @@ function Composer({
           )}
         </div>
 
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          rows={1}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={idlePlaceholder}
+          className={styles.composerTextarea}
+          style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
+        />
+
         <button
           onClick={sending ? onStop : onSend}
           disabled={!sending && !input.trim()}
-          className="focus-ring w-8 h-8 rounded-full bg-accent flex items-center justify-center disabled:opacity-40 transition hover:bg-accent-soft"
+          className={`focus-ring ${styles.sendButton}`}
           title={sending ? "Stop" : "Send"}
         >
           {sending ? <IconStop size={13} /> : <IconSend size={15} />}
@@ -1138,7 +964,7 @@ function PlanningComposer({ questions, index, setIndex, answers, setAnswers, onC
       </div>
       <div className="h-1 bg-line rounded-full overflow-hidden mb-3">
         <div
-          className="h-full bg-gradient-to-r from-accent-from to-accent-to transition-all duration-300"
+          className="h-full bg-gradient-to-r from-accent-from via-accent-via to-accent-to transition-all duration-300"
           style={{ width: `${((index + 1) / questions.length) * 100}%` }}
         />
       </div>
@@ -1168,7 +994,7 @@ function PlanningComposer({ questions, index, setIndex, answers, setAnswers, onC
         <button
           onClick={handleNext}
           disabled={!selected}
-          className="focus-ring bg-btn text-btn-foreground disabled:opacity-30 font-medium text-xs px-4 py-2 rounded-lg hover:bg-btn/90 transition"
+          className="focus-ring bg-btn text-btn-foreground disabled:opacity-30 font-medium text-xs px-4 py-2 rounded-lg hover:bg-btn/90 hover:shadow-[0_0_16px_rgba(109,94,248,0.35)] transition"
         >
           {isLast ? "Build survey" : "Next"}
         </button>

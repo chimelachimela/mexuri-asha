@@ -66,20 +66,6 @@ function mapSurveyRow(row, questions = [], responses = []) {
   };
 }
 
-function mapSheetRow(row) {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    chatId: row.chat_id || null,
-    title: row.title,
-    columns: row.columns || [],
-    rows: row.rows || [],
-    sourceFileName: row.source_file_name || null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 // ---------- Chats ----------
 
 export async function listChats(userId) {
@@ -342,57 +328,3 @@ export async function submitResponse(surveyId, answers) {
   return getSurvey(surveyId);
 }
 
-// ---------- Asha Sheets ----------
-
-export async function listSheets(userId) {
-  const { data, error } = await supabase
-    .from("sheets")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data.map(mapSheetRow);
-}
-
-export async function getSheet(sheetId) {
-  const { data, error } = await supabase.from("sheets").select("*").eq("id", sheetId).single();
-  if (error) throw error;
-  return mapSheetRow(data);
-}
-
-export async function createSheet(userId, { title, columns, rows, sourceFileName, chatId }) {
-  const { data, error } = await supabase
-    .from("sheets")
-    .insert({
-      user_id: userId,
-      chat_id: chatId || null,
-      title,
-      columns,
-      rows,
-      source_file_name: sourceFileName || null,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return mapSheetRow(data);
-}
-
-// Full replace of columns/rows (and optionally title) — used both by
-// manual cell edits on the Sheets detail page and by any future re-run of
-// an AI transform. updated_at is bumped explicitly since Supabase doesn't
-// auto-touch it on update.
-export async function updateSheet(sheetId, { title, columns, rows }) {
-  const patch = { updated_at: new Date().toISOString() };
-  if (title !== undefined) patch.title = title;
-  if (columns !== undefined) patch.columns = columns;
-  if (rows !== undefined) patch.rows = rows;
-
-  const { data, error } = await supabase.from("sheets").update(patch).eq("id", sheetId).select().single();
-  if (error) throw error;
-  return mapSheetRow(data);
-}
-
-export async function deleteSheet(sheetId) {
-  const { error } = await supabase.from("sheets").delete().eq("id", sheetId);
-  if (error) throw error;
-}

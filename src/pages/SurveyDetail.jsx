@@ -219,7 +219,7 @@ export default function SurveyDetail() {
                   <button
                     onClick={saveEditing}
                     disabled={saving}
-                    className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 transition disabled:opacity-50"
+                    className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 hover:shadow-[0_0_16px_rgba(109,94,248,0.35)] transition disabled:opacity-50"
                   >
                     {saving ? "Saving…" : "Save"}
                   </button>
@@ -255,7 +255,7 @@ export default function SurveyDetail() {
                   ) : (
                     <button
                       onClick={togglePublish}
-                      className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 transition"
+                      className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 hover:shadow-[0_0_16px_rgba(109,94,248,0.35)] transition"
                     >
                       Publish
                     </button>

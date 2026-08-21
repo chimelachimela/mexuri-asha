@@ -70,7 +70,7 @@ export default function Settings() {
             <div className="text-xs text-ink/30 mt-2">{session?.email}</div>
           </section>
 
-          <section className="mb-8">
+          {/* <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Plan</h2>
 
             {justPaid && (
@@ -90,14 +90,14 @@ export default function Settings() {
               </div>
               <button
                 onClick={() => setShowPaymentModal(true)}
-                className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 transition"
+                className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 hover:shadow-[0_0_16px_rgba(109,94,248,0.35)] transition"
               >
                 {isPro ? "Renew" : "Upgrade"}
               </button>
             </div>
           </section>
 
-          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />}
+          {showPaymentModal && <PaymentModal onClose={() => setShowPaymentModal(false)} />} */}
 
           <section className="mb-8">
             <h2 className="text-sm font-semibold text-ink/50 mb-3">Theme</h2>

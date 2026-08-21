@@ -51,24 +51,7 @@ export async function generateSurvey({ chatContext }) {
   return authedPost("/api/ai/generate-survey", { chatContext });
 }
 
-// summary is the compact column-stats/sample text from documentInsights.js
-// — never the full dataset. Returns { title, operations } for
-// sheetTransform.js to apply to the real, fully-parsed rows client-side.
-export async function generateSheet({ fileName, summary, instruction }) {
-  return authedPost("/api/ai/generate-sheet", { fileName, summary, instruction });
-}
-
-
 export async function generatePlanningQuestions(topic) {
   const { questions } = await authedPost("/api/ai/generate-planning-questions", { topic });
   return questions;
-}
-
-// imageUrls must be reachable by Groq's servers — Supabase signed URLs
-// (see storageService.getAttachmentUrl), not local blob: URLs. Analyzes
-// every image in one batched call and returns summaries in the same order.
-export async function analyzeImages(imageUrls) {
-  if (!imageUrls.length) return [];
-  const { summaries } = await authedPost("/api/ai/analyze-images", { imageUrls });
-  return summaries;
 }

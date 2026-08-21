@@ -2,32 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Copy, Check, ThumbsUp, ThumbsDown, RotateCw, FileText, Pencil } from "lucide-react";
 import ChatChart from "./ChatChart";
 import TemplateSuggestionCard from "./survey-templates/TemplateSuggestionCard";
-import AttachmentPreview from "./AttachmentPreview";
 import MarkdownText from "./MarkdownText";
-import { getAttachmentUrl } from "../lib/services/storageService";
-import SheetPreviewCard from "./SheetPreviewCard";
-
-function AttachmentItem({ attachment }) {
-  const [previewUrl, setPreviewUrl] = useState(attachment.previewUrl || null);
-
-  useEffect(() => {
-    if (!attachment.previewUrl && attachment.type === "image" && attachment.path) {
-      getAttachmentUrl(attachment.path).then(setPreviewUrl).catch(() => { });
-    }
-  }, [attachment.previewUrl, attachment.path, attachment.type]);
-
-  return <AttachmentPreview fileName={attachment.fileName} type={attachment.type} previewUrl={previewUrl} />;
-}
-
-function AttachedFiles({ message }) {
-  const attachments = message.attachments || [];
-  if (!attachments.length) return null;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {attachments.map((a, i) => <AttachmentItem key={a.path || i} attachment={a} />)}
-    </div>
-  );
-}
 
 export default function ChatMessage({
   message,
@@ -97,14 +72,8 @@ export default function ChatMessage({
             <span className="text-[11px] text-ink/60 truncate">{message.referencedSurveyTitle}</span>
           </div>
         )}
-        {message.attachments?.length > 0 && (
-          <div className="mb-1.5">
-            <AttachedFiles message={message} />
-          </div>
-        )}
-
         {editing ? (
-          <div className="w-full max-w-[80%] bg-panel2 rounded-2xl px-4 py-2.5">
+          <div className="w-full max-w-[90%] bg-panel2 rounded-2xl px-4 py-2.5">
             <textarea
               ref={textareaRef}
               value={draft}
@@ -185,14 +154,6 @@ export default function ChatMessage({
               locked={block.locked}
               building={confirming}
               onSelect={(id) => handlePickDesign(id, block.draft)}
-            />
-          ) : block.type === "sheet" ? (
-            <SheetPreviewCard
-              key={i}
-              sheetId={block.sheetId}
-              title={block.title}
-              columns={block.columns}
-              rows={block.rows}
             />
           ) : (
             <MarkdownText key={i} content={block.content} />

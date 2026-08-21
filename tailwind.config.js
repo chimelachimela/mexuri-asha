@@ -41,19 +41,25 @@ export default {
           foreground: withOpacity("--color-btn-foreground"),
         },
         accent: {
-          from: "#6366f1",
-          to: "#a855f7",
-          DEFAULT: "#6d5ef8",
-          soft: "#8b7cf6",
+          // Gemini's signature blue → violet → pink sweep
+          from: "#4C8DF6",
+          via: "#9168F0",
+          to: "#F45FA0",
+          DEFAULT: "#6C63F5",
+          soft: "#9C8CFB",
         },
       }, fontFamily: {
         sans: ["Montserrat", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       borderRadius: {
         xl2: "1.25rem",
+        "4xl": "1.75rem", // M3 "extra-large" shape — hero cards, sheets
       },
       boxShadow: {
         modal: "0 20px 60px rgba(0,0,0,0.5)",
+        elevation1: "var(--shadow-1)",
+        elevation2: "var(--shadow-2)",
+        elevation4: "var(--shadow-4)",
       },
       keyframes: {
         fadeIn: { "0%": { opacity: 0 }, "100%": { opacity: 1 } },
