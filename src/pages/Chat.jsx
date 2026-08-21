@@ -9,7 +9,7 @@ import PaymentModal from "../components/PaymentModal";
 import SurveyPickerModal from "../components/SurveyPickerModal";
 import * as db from "../lib/services/dbService";
 import * as ai from "../lib/services/aiService";
-import { recommendTemplate } from "../lib/templates/compatibility";
+import { rankTemplates, matchTemplateFromText } from "../lib/templates/compatibility";
 import styles from "./ChatHome.module.css";
 
 // ---------- sparkle mark (Gemini-style four-point accent, own gradient) ----------
@@ -252,6 +252,7 @@ export default function Chat() {
   const [planningIndex, setPlanningIndex] = useState(0);
   const [planningAnswers, setPlanningAnswers] = useState({});
   const [buildPanel, setBuildPanel] = useState(null); // { building, survey } | null
+  const [pendingDesign, setPendingDesign] = useState(null); // { messageId, draft, options } | null — awaiting a design choice, typed or tapped
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const scrollRef = useRef(null);
@@ -305,6 +306,7 @@ export default function Chat() {
     setInput("");
     setReferencedSurvey(null);
     setPlanningQuestions(null);
+    setPendingDesign(null);
   }
 
   function handleSelectChat(id) {
@@ -364,6 +366,21 @@ export default function Chat() {
       });
       chat = { ...chat, messages: [...chat.messages, userMsg] };
       setActiveChat(chat);
+
+      // A design decision is pending (the design-suggestion card is up,
+      // unlocked) — see if what they typed reads as a design choice
+      // ("make it feel like a slideshow") before treating this as a
+      // normal chat turn. A match builds the survey immediately; no
+      // match just falls through to the AI reply below as usual.
+      if (pendingDesign) {
+        const matchedId = matchTemplateFromText(text, pendingDesign.options);
+        if (matchedId) {
+          setSending(false);
+          abortRef.current = null;
+          await handleConfirmDesign(pendingDesign.messageId, matchedId, pendingDesign.draft);
+          return;
+        }
+      }
 
       setThinkingLabel(referencedSurvey ? "Analyzing" : "Thinking");
       const titlePromise = !chat.titleLocked ? ai.generateChatTitle(text) : Promise.resolve(null);
@@ -544,6 +561,12 @@ export default function Chat() {
       const source = messagesOverride || activeChat?.messages || [];
       const transcript = source.map((m) => `${m.role}: ${m.text}`).join("\n");
       const questions = await ai.generatePlanningQuestions(transcript);
+      if (!questions.length) {
+        // Asha already understands the project well enough from the chat —
+        // skip the planning step and go straight to drafting the survey.
+        await handlePlanningComplete({});
+        return;
+      }
       setPlanningQuestions(questions);
       setPlanningIndex(0);
       setPlanningAnswers({});
@@ -575,23 +598,31 @@ export default function Chat() {
       ].join("\n");
 
       const drafted = await ai.generateSurvey({ chatContext });
-      const recommended = recommendTemplate(drafted.questions);
+      const shortlist = rankTemplates(drafted.questions, 3);
 
       const suggestionMsg = await db.appendMessage(activeChat.id, {
         role: "assistant",
-        text: `I've drafted "${drafted.title}". Pick a design direction and I'll build it.`,
+        text: `I've drafted "${drafted.title}". Here are three design directions that would fit — pick one, or tell me what look you're after.`,
         blocks: [
-          { type: "text", content: `I've drafted **${drafted.title}**. Pick a design direction and I'll build it.` },
+          { type: "text", content: `I've drafted **${drafted.title}**. Here are three design directions that would fit — pick one below, or just tell me what look you're after.` },
           {
             type: "templateSuggestion",
             draft: drafted,
             questions: drafted.questions,
-            templateId: recommended.id,
+            templateId: null,
             locked: false,
           },
         ],
       });
       setActiveChat((chat) => ({ ...chat, messages: [...chat.messages, suggestionMsg] }));
+      // Lets handleSend recognize a typed reply as a design decision
+      // (e.g. "make it feel like a slideshow") instead of routing it
+      // through the general chat model.
+      setPendingDesign({
+        messageId: suggestionMsg.id,
+        draft: drafted,
+        options: shortlist,
+      });
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || "Couldn't draft the survey. Please try again.");
@@ -612,6 +643,7 @@ export default function Chat() {
       setBuildPanel({ building: false, survey });
       setMySurveys((prev) => [survey, ...prev]);
       addSurveyToList(survey);
+      setPendingDesign(null);
 
       // Lock the card in place so it reads as decided rather than still pickable.
       const msg = activeChat.messages.find((m) => m.id === messageId);
@@ -936,14 +968,34 @@ function Composer({
 
 // Inline replacement for the composer while planning questions are being
 // asked — same information as the old fullscreen modal, just docked in
-// place instead of interrupting the chat.
+// place instead of interrupting the chat. Founders can either tap a
+// suggested option OR type their own answer straight into the chatbox —
+// picking isn't the only way through.
 function PlanningComposer({ questions, index, setIndex, answers, setAnswers, onComplete, onCancel }) {
   const q = questions[index];
   const selected = answers[q.id];
   const isLast = index === questions.length - 1;
+  const [customText, setCustomText] = useState("");
+
+  // Reset the typed draft whenever the question changes, but keep it
+  // prefilled if the founder already typed a custom answer for this one
+  // (e.g. after hitting Back).
+  useEffect(() => {
+    setCustomText(selected && !q.options.includes(selected) ? selected : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.id]);
 
   function selectOption(opt) {
+    setCustomText("");
     setAnswers((a) => ({ ...a, [q.id]: opt }));
+  }
+
+  function submitCustom() {
+    const val = customText.trim();
+    if (!val) return;
+    setAnswers((a) => ({ ...a, [q.id]: val }));
+    if (isLast) onComplete({ ...answers, [q.id]: val });
+    else setIndex(index + 1);
   }
 
   function handleNext() {
@@ -983,6 +1035,31 @@ function PlanningComposer({ questions, index, setIndex, answers, setAnswers, onC
           </button>
         ))}
       </div>
+
+      {/* Free-text alternative — answering doesn't require picking one of
+          the suggested options above. */}
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          value={customText}
+          onChange={(e) => setCustomText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitCustom();
+            }
+          }}
+          placeholder="Or type your own answer…"
+          className="focus-ring flex-1 min-w-0 text-xs bg-transparent border border-line2 rounded-full px-3 py-2 placeholder:text-ink/30 focus:border-accent-soft transition"
+        />
+        <button
+          onClick={submitCustom}
+          disabled={!customText.trim()}
+          className="focus-ring shrink-0 text-xs font-medium text-ink/60 hover:text-ink disabled:opacity-30 disabled:hover:text-ink/60 border border-line2 rounded-full px-3 py-2 transition"
+        >
+          {isLast ? "Use & build" : "Use"}
+        </button>
+      </div>
+
       <div className="flex items-center justify-between">
         <button
           onClick={() => setIndex((i) => Math.max(0, i - 1))}

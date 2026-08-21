@@ -77,6 +77,7 @@ export default {
         slideUpSheet: "slideUpSheet 0.35s cubic-bezier(0.16,1,0.3,1) both",
         orbit: "orbit 2.2s linear infinite",
       },
+
     },
   },
   plugins: [],

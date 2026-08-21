@@ -13,11 +13,11 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
   const { chatContext } = req.body;
-  const prompt = `Based on this conversation, design a survey with 4-6 questions that would gather useful, decision-relevant data.
+  const prompt = `Based on this conversation, design a survey that gathers useful, decision-relevant data.
 
 Conversation context: ${chatContext}
 
-Each question is one of: "single" (single choice), "multi" (multiple choice), "text" (open-ended, no options), "scale" (1-5 rating, options must be ["1","2","3","4","5"]). Give 4-6 realistic, specific options for single/multi questions — not generic placeholders.
+Use as many questions as this specific goal actually needs to get a complete, decision-useful picture — no more, no fewer. A narrow, single-answer question might only need 2-3; a fuller profile might need 8-10+. Don't pad toward a round number and don't cut a question that's needed just to keep the count low. Each question is one of: "single" (single choice), "multi" (multiple choice), "text" (open-ended, no options), "scale" (1-5 rating, options must be ["1","2","3","4","5"]). Give 4-6 realistic, specific options for single/multi questions — not generic placeholders.
 
 STRICT ADHERENCE RULE: if the conversation explicitly names specific fields/questions to include, or a specific number of questions/steps/screens, you MUST follow that exactly — same fields, same count, same wording as closely as possible. Do not add extra questions, drop any, or substitute your own ideas in their place. Only use your own judgment to fill in anything the user left unspecified (e.g. answer options for a field they named but didn't detail).
 

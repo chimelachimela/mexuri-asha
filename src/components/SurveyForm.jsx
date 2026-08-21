@@ -121,7 +121,28 @@ export function SurveyThanksScreen() {
           <CheckCircle2 size={26} className="text-emerald-400" />
         </div>
         <h1 className="text-xl font-bold mb-2">Thanks for your response!</h1>
-        <p className="text-ink/40 text-sm">It's been recorded.</p>
+        <p className="text-ink/40 text-sm mb-10">It's been recorded.</p>
+
+        <div className="rounded-2xl border border-line bg-gradient-to-br from-accent/10 via-accent-soft/5 to-transparent px-6 py-7">
+          <img
+            src="https://res.cloudinary.com/xtydyhi0/image/upload/v1784464670/Asha_Logo_forBlack_mt8s2u.svg"
+            width="36px"
+            alt=""
+            className="mx-auto mb-4 opacity-90"
+          />
+          <h2 className="text-base font-bold mb-1.5">Build surveys like this one</h2>
+          <p className="text-ink/50 text-sm mb-5">
+            This form was built in minutes with Asha — describe what you need, and the AI drafts it for you.
+          </p>
+          <a
+            href="https://asha.com.ng?utm_source=survey_thanks&utm_medium=respondent_cta"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center w-full rounded-full bg-accent text-white text-sm font-semibold py-3 hover:opacity-90 active:scale-[0.98] transition"
+          >
+            Try Asha for free
+          </a>
+        </div>
       </div>
     </div>
   );

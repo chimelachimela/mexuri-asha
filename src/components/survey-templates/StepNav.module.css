@@ -36,12 +36,23 @@
     padding: 10px 22px;
     border-radius: 999px;
     border: none;
-    background: rgb(var(--color-btn));
-    color: rgb(var(--color-btn-foreground));
+    background: rgb(var(--color-accent));
+    color: white;
     cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.next:hover:not(:disabled) {
+    opacity: 0.92;
+}
+
+.next:active:not(:disabled) {
+    transform: scale(0.96);
 }
 
 .next:disabled {
+    background: rgb(var(--color-btn));
+    color: rgb(var(--color-btn-foreground));
     opacity: 0.4;
     cursor: default;
 }

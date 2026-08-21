@@ -40,18 +40,14 @@ export default function Login() {
 
   return (
     <div className="min-h-screen w-full bg-base-950 flex flex-col lg:flex-row">
-      {/* Hero side */}
-      <div className="relative lg:w-4/5 min-h-[380px] lg:min-h-screen overflow-hidden flex flex-col justify-between p-8 sm:p-10">
+      {/* Hero side — image fills this column only, no shape/mask on the edge */}
+      <div className="relative lg:w-1/2 min-h-[380px] lg:min-h-screen overflow-hidden flex flex-col justify-between p-8 sm:p-10">
         <img
-          src="https://res.cloudinary.com/xtydyhi0/image/upload/v1784464515/img_m3zoyo.jpg"
+          src="https://res.cloudinary.com/dbrjr5zqp/image/upload/v1787343463/Dada_teeh_c7tzxg.jpg"
           alt=""
-          className="absolute inset-0 w-full h-full object-cover opacity-100"
+          className="absolute inset-0 w-full h-full object-cover"
         />
-        <div className="absolute inset-0 from-base-950 via-base-950/70 to-base-950/20" />
-        <div
-          className="absolute -right-24 top-0 bottom-0 w-64 bg-base-950 hidden lg:block"
-          style={{ borderRadius: "120px 0 0 120px" }}
-        />
+        <div className="absolute inset-0 bg-gradient-to-t from-base-950 via-base-950/70 to-base-950/20" />
 
         <div className="relative z-10 flex items-center gap-3">
           <div className="flex items-center justify-center">
@@ -59,12 +55,12 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="relative z-10 max-w-sm">
+        <div className="relative z-10 max-w-lg">
           <span className="inline-block text-[11px] font-semibold tracking-wide uppercase bg-white/10 text-white/80 px-3 py-1.5 rounded-full mb-4">
             Your AI survey builder
           </span>
           <p className="text-4xl font-semibold leading-snug">
-            Who said surveys can't be fun? <br /> Definitely not us.
+            As AI builds <br /> Let humans be heard.
           </p>
         </div>
       </div>
@@ -72,13 +68,13 @@ export default function Login() {
       {/* Form side */}
       <div className="lg:w-1/2 flex items-center justify-center p-8">
         <div className="w-full max-w-sm animate-fadeInUp">
-          <h2 className="text-3xl font-bold mb-2">Welcome Back</h2>
+          <h2 className="text-5xl font-bold mb-2">Welcome Back</h2>
           <p className="text-white/50 mb-8">Sign in to your workspace</p>
 
           <button
             onClick={handleGoogle}
             disabled={loading || !accepted}
-            className="focus-ring w-full flex items-center justify-center gap-3 bg-white text-base-950 font-medium rounded-xl py-3.5 mb-3 hover:bg-white/90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="focus-ring w-full flex items-center justify-center gap-3 bg-white text-base-950 font-medium py-3.5 mb-3 hover:bg-white/90 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {loading ? (
               <span className="w-4 h-4 border-2 border-base-950/30 border-t-base-950 rounded-full animate-spin" />

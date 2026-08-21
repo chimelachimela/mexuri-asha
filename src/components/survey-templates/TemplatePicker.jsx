@@ -2,19 +2,23 @@ import { Check, Sparkles } from "lucide-react";
 import { getCompatibleTemplates } from "../../lib/templates/compatibility";
 import TemplateThumbnail from "./TemplateThumbnail";
 
-// Shows every template compatible with the current question mix as a
-// grid of visual preview cards (real layout shape, not just a name) so
-// a founder can recognize and swap templates at a glance. Used in the
-// builder panel, the survey detail page, and (compact) the in-chat
+// Shows a grid of visual preview cards (real layout shape, not just a
+// name) so a founder can recognize and swap templates at a glance. Used
+// in the builder panel, the survey detail page, and (compact) the in-chat
 // design-suggestion card right after Asha builds a survey.
-export default function TemplatePicker({ questions, selectedId, recommendedId, onSelect, compact = false }) {
-  const compatible = getCompatibleTemplates(questions);
+//
+// By default shows every compatible template; pass `templates` to show a
+// specific shortlist instead (e.g. the in-chat card's three even-handed
+// options). `recommendedId` is optional — omit it to present options
+// without biasing toward one (matches the "let them choose" chat flow).
+export default function TemplatePicker({ questions, selectedId, recommendedId, templates, onSelect, compact = false }) {
+  const list = templates || getCompatibleTemplates(questions);
 
   return (
     <div className={`grid gap-2.5 ${compact ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-3"}`}>
-      {compatible.map((t) => {
+      {list.map((t) => {
         const isSelected = t.id === selectedId;
-        const isRecommended = t.id === recommendedId;
+        const isRecommended = recommendedId && t.id === recommendedId;
         return (
           <button
             key={t.id}

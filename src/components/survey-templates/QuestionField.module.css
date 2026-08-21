@@ -24,12 +24,16 @@
 }
 
 .option:hover {
-    border-color: rgb(var(--color-line-2));
+    border-color: rgb(var(--color-accent-soft));
 }
 
 .optionSelected {
-    border-color: rgb(var(--color-ink));
-    background: rgb(var(--color-panel-2));
+    border-color: rgb(var(--color-accent));
+    background: rgb(var(--color-accent) / 0.1);
+}
+
+.optionSelected:hover {
+    border-color: rgb(var(--color-accent));
 }
 
 .optionLabel {
@@ -40,6 +44,7 @@
 
 .check {
     flex-shrink: 0;
+    color: rgb(var(--color-accent));
 }
 
 .scaleRow {
@@ -61,7 +66,11 @@
 }
 
 .scaleOption:hover {
-    border-color: rgb(var(--color-line-2));
+    border-color: rgb(var(--color-accent-soft));
+}
+
+.scaleOption.optionSelected {
+    color: rgb(var(--color-accent));
 }
 
 .textArea {
@@ -82,5 +91,5 @@
 
 .textArea:focus {
     outline: none;
-    border-color: rgb(var(--color-ink));
+    border-color: rgb(var(--color-accent));
 }

@@ -23,6 +23,12 @@
   /* primary action — inverted from canvas in both themes, per existing convention */
   --color-btn: 236 236 246;
   --color-btn-foreground: 22 22 27;
+  /* brand accent — same indigo/violet as tailwind.config.js `accent.DEFAULT`
+     / `accent.soft`, exposed as a CSS var too since some survey UI is styled
+     via plain CSS modules rather than Tailwind classes. Static across both
+     themes (it's a brand color, not a surface tone). */
+  --color-accent: 108 99 245;
+  --color-accent-soft: 156 140 251;
 
   /* Google's own elevation shadow recipe (rgba(60,64,67,...)) — used across
      Material web and Search. Kept as one recipe, scaled by alpha in dark. */
@@ -92,6 +98,13 @@ html.light .composer-glow {
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  /* Global +15% type scale — every Tailwind text-* utility here is
+     rem-based, so bumping the root size scales all of them together
+     (arbitrary-value sizes like text-[11px] are the rare exception). */
+  font-size: 115%;
 }
 
 html,

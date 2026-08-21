@@ -11,14 +11,23 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: "Unauthorized" });
 
   const { topic } = req.body;
-  const prompt = `A user wants to build a survey about: "${topic}"
+  const prompt = `A user wants to build a survey about: "${topic}" (this may be a single line, or a full conversation transcript — read whatever is there).
 
-Before drafting the survey, write exactly 5 short planning questions to ask Asha's own user (not the eventual survey respondents) to understand their situation — things like how they currently handle this, who's involved, urgency, and what success looks like. Each question needs 4-5 realistic multiple-choice options.
+Before drafting the survey, think like an actual research consultant meeting this founder for the first time: what would genuinely change the design of the survey if you knew it, that you don't already know? Re-read what's already there first: if the topic/transcript already makes the goal, audience, and what "useful data" means clear, you don't need to ask anything.
+
+Go deeper than the surface topic — consider, where relevant and not already answered: who exactly the respondents are (not just "customers" but which segment); what decision or action the results are meant to drive; what "done well" looks like for this project; any constraint on length, timing, or channel; and anything the user said that hints at a nuance a generic version of this survey would miss. Only turn a genuine gap into a question — don't ask about something just because it's on this list.
+
+Rules:
+- Ask ONLY about things that are still genuinely ambiguous or missing for drafting a good survey on THIS project — never a stock set of questions (e.g. "how do you currently handle this / who's involved / urgency / success looks like") that could apply to any topic. Every question must reference specifics from what was actually said.
+- Never ask about something already stated or clearly implied in the topic/transcript.
+- If everything you need is already clear, return an empty array — do not invent filler questions just to have some.
+- Otherwise, ask as few questions as it actually takes to fill the real gaps — usually 1-4, occasionally more for a genuinely underspecified request. Don't pad to hit a round number.
+- Each question needs 4-5 realistic, specific options grounded in the project (not generic placeholders like "Yes/No/Maybe"). The founder can also always type a free-form answer instead of picking one of your options, so it's fine for the options to be concrete best guesses rather than exhaustive.
 
 ${BRAND_RULES}
 
 Respond with ONLY a JSON object of this shape:
-{"questions": [{"text": string, "options": string[]}, ...]} — exactly 5 items in the array.`;
+{"questions": [{"text": string, "options": string[]}, ...]} — as many items as are genuinely needed, including zero.`;
 
   try {
     const result = await callGroq({

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { ArrowLeft, Copy, Check, Link2, Eye, X, Code2, Pencil, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Copy, Check, Link2, Eye, X, Code2, Pencil, Trash2, Plus, MoreVertical, Send } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { SurveyForm, SurveyFormChrome } from "../components/SurveyForm";
 import ConfirmModal from "../components/ConfirmModal";
@@ -34,6 +34,7 @@ export default function SurveyDetail() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     db.getSurvey(surveyId).then(setSurvey);
@@ -225,42 +226,16 @@ export default function SurveyDetail() {
                   </button>
                 </>
               ) : (
-                <>
-                  <button
-                    onClick={() => setConfirmDelete(true)}
-                    className="focus-ring flex items-center justify-center w-9 h-9 rounded-lg border border-line2 text-ink/50 hover:text-red-400 hover:border-red-400/40 transition"
-                    title="Delete survey"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                  <button
-                    onClick={startEditing}
-                    className="focus-ring flex items-center gap-1.5 text-sm font-medium border border-line2 rounded-lg px-4 py-2 hover:bg-panel transition"
-                  >
-                    <Pencil size={13} /> Edit
-                  </button>
-                  <button
-                    onClick={() => setPreviewOpen(true)}
-                    className="focus-ring flex items-center gap-1.5 text-sm font-medium border border-line2 rounded-lg px-4 py-2 hover:bg-panel transition"
-                  >
-                    <Eye size={14} /> Preview
-                  </button>
-                  {survey.status === "published" ? (
-                    <button
-                      onClick={togglePublish}
-                      className="focus-ring text-sm font-medium border border-line2 rounded-lg px-4 py-2 hover:bg-panel transition"
-                    >
-                      Unpublish
-                    </button>
-                  ) : (
-                    <button
-                      onClick={togglePublish}
-                      className="focus-ring text-sm font-medium bg-btn text-btn-foreground rounded-lg px-4 py-2 hover:bg-btn/90 hover:shadow-[0_0_16px_rgba(109,94,248,0.35)] transition"
-                    >
-                      Publish
-                    </button>
-                  )}
-                </>
+                <SurveyMenu
+                  open={menuOpen}
+                  onToggle={() => setMenuOpen((o) => !o)}
+                  onClose={() => setMenuOpen(false)}
+                  published={survey.status === "published"}
+                  onEdit={() => { startEditing(); setMenuOpen(false); }}
+                  onPreview={() => { setPreviewOpen(true); setMenuOpen(false); }}
+                  onPublishToggle={() => { togglePublish(); setMenuOpen(false); }}
+                  onDelete={() => { setConfirmDelete(true); setMenuOpen(false); }}
+                />
               )}
             </div>
           </div>
@@ -478,6 +453,58 @@ export default function SurveyDetail() {
 
       {previewOpen && (
         <PreviewModal survey={survey} onClose={() => setPreviewOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// Compact overflow menu for the survey-detail header — keeps the top of
+// the page to just the title/status/share row, with delete, edit, preview,
+// and publish tucked behind one three-dot button instead of four buttons
+// competing for attention up top.
+function SurveyMenu({ open, onToggle, onClose, published, onEdit, onPreview, onPublishToggle, onDelete }) {
+  return (
+    <div className="relative">
+      <button
+        onClick={onToggle}
+        title="Survey actions"
+        className="focus-ring flex items-center justify-center w-9 h-9 rounded-lg border border-line2 text-ink/60 hover:text-ink hover:bg-panel transition"
+      >
+        <MoreVertical size={16} />
+      </button>
+
+      {open && (
+        <>
+          {/* Click-outside backdrop */}
+          <div className="fixed inset-0 z-10" onClick={onClose} />
+          <div className="absolute right-0 top-11 z-20 w-48 bg-panel border border-line rounded-xl shadow-modal py-1.5 animate-fadeInUp">
+            <button
+              onClick={onPreview}
+              className="focus-ring w-full flex items-center gap-2.5 text-left text-sm text-ink/80 hover:bg-panel2 px-3.5 py-2.5 transition"
+            >
+              <Eye size={14} /> Preview
+            </button>
+            <button
+              onClick={onEdit}
+              className="focus-ring w-full flex items-center gap-2.5 text-left text-sm text-ink/80 hover:bg-panel2 px-3.5 py-2.5 transition"
+            >
+              <Pencil size={13} /> Edit
+            </button>
+            <button
+              onClick={onPublishToggle}
+              className="focus-ring w-full flex items-center gap-2.5 text-left text-sm text-ink/80 hover:bg-panel2 px-3.5 py-2.5 transition"
+            >
+              <Send size={13} /> {published ? "Unpublish" : "Publish"}
+            </button>
+            <div className="h-px bg-line my-1.5" />
+            <button
+              onClick={onDelete}
+              className="focus-ring w-full flex items-center gap-2.5 text-left text-sm text-red-400/90 hover:bg-red-500/10 hover:text-red-400 px-3.5 py-2.5 transition"
+            >
+              <Trash2 size={13} /> Delete
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
