@@ -37,15 +37,75 @@ function Routed() {
     <Routes>
       <Route path="/" element={<Navigate to={session ? "/chat" : "/login"} replace />} />
       <Route path="/s/:slug" element={<PublicSurvey />} />
-      <Route path="/login" element={<RequireGuest><Login /></RequireGuest>} />
-      <Route path="/onboarding" element={session ? (session.onboarded ? <Navigate to="/chat" replace /> : <Onboarding />) : <Navigate to="/login" replace />} />
+      <Route
+        path="/login"
+        element={
+          <RequireGuest>
+            <Login />
+          </RequireGuest>
+        }
+      />
+      <Route
+        path="/onboarding"
+        element={
+          session ? (
+            session.onboarded ? <Navigate to="/chat" replace /> : <Onboarding />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
       <Route path="/loading" element={session ? <LoadingSplash /> : <Navigate to="/login" replace />} />
-      <Route path="/chat" element={<RequireAuth><Chat /></RequireAuth>} />
-      <Route path="/chat/:chatId" element={<RequireAuth><Chat /></RequireAuth>} />
-      <Route path="/surveys" element={<RequireAuth><Surveys /></RequireAuth>} />
-      <Route path="/surveys/:surveyId" element={<RequireAuth><SurveyDetail /></RequireAuth>} />
-      <Route path="/analytics" element={<RequireAuth><Analytics /></RequireAuth>} />
-      <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+
+      <Route
+        path="/chat"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/chat/:chatId"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/surveys"
+        element={
+          <RequireAuth>
+            <Surveys />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/surveys/:surveyId"
+        element={
+          <RequireAuth>
+            <SurveyDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/analytics"
+        element={
+          <RequireAuth>
+            <Analytics />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <RequireAuth>
+            <Settings />
+          </RequireAuth>
+        }
+      />
+
       <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
