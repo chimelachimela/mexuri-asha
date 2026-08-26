@@ -9,9 +9,7 @@ function prune(now) {
   for (const [key, entry] of cache) {
     if (entry.expiresAt <= now) cache.delete(key);
   }
-  while (cache.size > MAX_ENTRIES) {
-    cache.delete(cache.keys().next().value);
-  }
+  while (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value);
 }
 
 export function normalizeCacheKey(value = "") {
