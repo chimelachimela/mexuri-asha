@@ -27,8 +27,6 @@ export default async function handler(req, res) {
   const transcript = history.map((m) => `${m.role.toUpperCase()}: ${m.text}`).join("\n");
   const simpleRequest = shouldUseLightModel({ history, referencedSurvey, documentContexts });
 
-  // Cache only context-free, first-turn requests. Never reuse a response that
-  // could contain survey, document, or conversation-specific information.
   const cacheKey = simpleRequest
     ? `${responseStyle}:${normalizeCacheKey(userMessage || "")}`
     : null;
@@ -49,16 +47,13 @@ Questions:
 ${questionLines || "(no questions)"}
 
 Response data:
-${referencedSurvey.responseSummary || "No responses have been collected yet."}
-
-If the user is asking about this survey's results, analyze the response data above and give clear, honest insights in simple, plain-English terms — no jargon. Ground every claim in the actual numbers given; never invent findings that aren't supported by the data above. If there isn't enough response data to say anything meaningful yet, say so plainly instead of making something up. Where relevant, follow the insight with a short, concrete piece of strategy or advice on what to do next.`;
+${referencedSurvey.responseSummary || "No responses have been collected yet."}`;
   }
 
-  let documentBlock = "";
-  for (const [i, d] of (documentContexts || []).entries()) {
-    if (!d?.summary) continue;
-    documentBlock += `\n\nFile ${i + 1}: "${d.fileName}"\n${d.summary}`;
-  }
+  const documentBlock = (documentContexts || [])
+    .filter((d) => d?.summary)
+    .map((d, i) => `\n\n--- File ${i + 1}: "${d.fileName}" ---\n${d.summary}`)
+    .join("");
   const hasRealData = !!(referencedSurvey?.responseSummary || documentBlock);
 
   const prompt = `You are Asha — an AI survey analyst. Your job is to help people with two things only: designing surveys to gather data they don't have yet, and making sense of survey response data they already have. You are not a general-purpose chatbot; every reply should move the user closer to a well-designed survey or a clear finding from their results.
@@ -66,7 +61,7 @@ Tone: ${STYLE_GUIDE[responseStyle] || STYLE_GUIDE.casual}
 
 ${BRAND_RULES}
 
-Respond with ONLY a JSON object of the shape: {"blocks":[{"type":"text","content":string}],"suggestSurvey":boolean} or include chart blocks when real data makes a chart genuinely useful. Ground every number in supplied data and never invent findings.
+Respond with ONLY a JSON object of the shape: {"blocks":[...],"suggestSurvey":boolean}. Ground every claim in supplied data and never invent numbers.
 
 Conversation so far:
 ${transcript || "(none yet)"}
